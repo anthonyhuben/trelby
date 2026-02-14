@@ -12,6 +12,7 @@ import trelby.misc as misc
 import trelby.screenplay as screenplay
 import trelby.titles as titles
 import trelby.util as util
+import trelby.pml as pml
 from trelby.importdlg import ImportDlg
 from trelby.indent import Indent
 from trelby.line import Line
@@ -23,6 +24,62 @@ SCENE_ACTION = -2
 # special linetype that means don't import those lines; useful for page
 # numbers etc
 IGNORE = -3
+
+
+def applyTags(line, tags_map):
+    # tags_map: dict mapping start_tag -> (flag, end_tag)
+    # e.g. "<b>": (pml.BOLD, "</b>")
+
+    # Process each tag type
+    for start_tag, (flag, end_tag) in tags_map.items():
+        # Construct regex for this tag pair
+        # Assumes no nesting of same tag type
+        # escape tags for regex
+        s_tag = re.escape(start_tag)
+        e_tag = re.escape(end_tag)
+        pattern = re.compile(f"{s_tag}(.*?){e_tag}", re.DOTALL)
+
+        while True:
+            # Re-search every time because indices change
+            match = pattern.search(line.text)
+            if not match:
+                break
+
+            start, end = match.span()
+            content_start = match.start(1)
+            content_end = match.end(1)
+
+            line.toggleStyle(content_start, content_end, flag)
+
+            # Remove tags
+            # Delete end tag first
+            line.deleteRange(content_end, end)
+            line.text = line.text[:content_end] + line.text[end:]
+
+            # Delete start tag
+            line.deleteRange(start, content_start)
+            line.text = line.text[:start] + line.text[content_start:]
+
+
+def applyRegex(line, regex, flag):
+    while True:
+        match = regex.search(line.text)
+        if not match:
+            break
+
+        start, end = match.span()
+        # Assume group 1 is the content
+        content_start = match.start(1)
+        content_end = match.end(1)
+
+        line.toggleStyle(content_start, content_end, flag)
+
+        line.deleteRange(content_end, end)
+        line.text = line.text[:content_end] + line.text[end:]
+
+        line.deleteRange(start, content_start)
+        line.text = line.text[:start] + line.text[content_start:]
+
 
 
 # like importTextFile, but for Adobe Story files.
@@ -134,6 +191,12 @@ def importFadein(fileName, frame):
 
     lines = []
 
+    tags_map = {
+        "<b>": (pml.BOLD, "</b>"),
+        "<i>": (pml.ITALIC, "</i>"),
+        "<u>": (pml.UNDERLINED, "</u>"),
+    }
+
     def addElem(eleType, lns):
         # if elem ends in a newline, last line is empty and useless;
         # get rid of it
@@ -141,20 +204,18 @@ def importFadein(fileName, frame):
             lns = lns[:-1]
 
         for s in lns[:-1]:
-            lines.append(Line(screenplay.LB_FORCED, eleType, util.cleanInput(s)))
+            line = Line(screenplay.LB_FORCED, eleType, util.cleanInput(s))
+            applyTags(line, tags_map)
+            lines.append(line)
 
-        lines.append(Line(screenplay.LB_LAST, eleType, util.cleanInput(lns[-1])))
+        line = Line(screenplay.LB_LAST, eleType, util.cleanInput(lns[-1]))
+        applyTags(line, tags_map)
+        lines.append(line)
 
     # removes html formatting from s, and returns list of lines.
     # if s is None, return a list with single empty string.
     re_rem = [r"<font[^>]*>", r"<size[^>]*>", r"<bgcolor[^>]*>"]
     rem = [
-        "<b>",
-        "</b>",
-        "<i>",
-        "</i>",
-        "<u>",
-        "</u>",
         "</font>",
         "</size>",
         "</bgcolor>",
@@ -722,8 +783,15 @@ def importFountain(fileName, frame, titlePages):
 
         if removeMarkdown:
             line.text = unmarkdown(line.text)
-            if line.lt == screenplay.CHARACTER and line.text.endswith("^"):
-                line.text = line.text[:-1]
+        else:
+            line.text = line.text.replace("\\*", literalstar)
+            applyRegex(line, bre, pml.BOLD)
+            applyRegex(line, ire, pml.ITALIC)
+            applyRegex(line, ure, pml.UNDERLINED)
+            line.text = line.text.replace(literalstar, "*")
+
+        if line.lt == screenplay.CHARACTER and line.text.endswith("^"):
+            line.text = line.text[:-1]
 
         lns.append(line)
 

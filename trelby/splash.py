@@ -30,7 +30,8 @@ class SplashWindow(wx.Frame):
 
         if not SplashWindow.inited:
             SplashWindow.inited = True
-            wx.Image.AddHandler(wx.JPEGHandler())
+            if not wx.Image.FindHandler(wx.BITMAP_TYPE_JPEG):
+                wx.Image.AddHandler(wx.JPEGHandler())
 
             self.loadQuotes(parent)
 

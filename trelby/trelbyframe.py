@@ -3,6 +3,7 @@
 import copy
 import os
 import os.path
+import re
 import signal
 import webbrowser
 from functools import partial
@@ -45,73 +46,107 @@ class MyFrame(wx.Frame):
         util.removeTempFiles(misc.tmpPrefix)
 
         self.mySetIcons()
+        self.applyModernWindowStyle()
         # self.allocIds()
 
         fileMenu = wx.Menu()
-        fileMenu.Append(ID_FILE_NEW, "(&N) " + _("New") + "\tCTRL-N")
-        fileMenu.Append(ID_FILE_OPEN, "(&O) " + _("Open") + "...\tCTRL-O")
-        fileMenu.Append(ID_FILE_SAVE, "(&S) " + _("Save") + "\tCTRL-S")
-        fileMenu.Append(ID_FILE_SAVE_AS, "(&A) " + _("Save As") + "...")
-        fileMenu.Append(ID_FILE_CLOSE, "(&C) " + _("Close\tCTRL-W"))
-        fileMenu.Append(ID_FILE_REVERT, "(&R) " + _("Revert"))
+        fileMenu.Append(ID_FILE_NEW, _("New") + "\tCTRL-N")
+        fileMenu.Append(ID_FILE_OPEN, _("Open") + "...\tCTRL-O")
+        fileMenu.Append(ID_FILE_SAVE, _("Save") + "\tCTRL-S")
+        fileMenu.Append(ID_FILE_SAVE_AS, _("Save As") + "...")
+        fileMenu.Append(ID_FILE_CLOSE, _("Close\tCTRL-W"))
+        fileMenu.Append(ID_FILE_REVERT, _("Revert"))
         fileMenu.AppendSeparator()
-        fileMenu.Append(ID_FILE_IMPORT, "(&I) " + _("Import") + "...")
-        fileMenu.Append(ID_FILE_EXPORT, "(&E) " + _("Export") + "...")
+        fileMenu.Append(ID_FILE_IMPORT, _("Import") + "...")
+        fileMenu.Append(ID_FILE_EXPORT, _("Export") + "...")
         fileMenu.AppendSeparator()
-        fileMenu.Append(ID_FILE_PRINT, "(&P) " + _("Print (via PDF)") + "\tCTRL-P")
+        fileMenu.Append(ID_FILE_PRINT, _("Print (via PDF)") + "\tCTRL-P")
         fileMenu.AppendSeparator()
 
         tmp = wx.Menu()
 
-        tmp.Append(ID_SETTINGS_CHANGE, "(&C) " + _("Change") + "...")
+        tmp.Append(ID_SETTINGS_CHANGE, _("Change") + "...")
         tmp.AppendSeparator()
         tmp.Append(ID_SETTINGS_LOAD, _("Load") + "...")
         tmp.Append(ID_SETTINGS_SAVE_AS, _("Save as") + "...")
         tmp.AppendSeparator()
-        tmp.Append(ID_SETTINGS_SC_DICT, "(&S) " + _("Spell checker dictionary") + "...")
+        tmp.Append(ID_SETTINGS_SC_DICT, _("Spell checker dictionary") + "...")
         settingsMenu = tmp
 
-        fileMenu.Append(ID_FILE_SETTINGS, "(&t) " + _("Settings"), tmp)
+        fileMenu.Append(ID_FILE_SETTINGS, _("Settings"), tmp)
 
         fileMenu.AppendSeparator()
         # "most recently used" list comes in here
         fileMenu.AppendSeparator()
-        fileMenu.Append(ID_FILE_EXIT, "(x) " + _("Exit") + "\tCTRL-Q")
+        fileMenu.Append(ID_FILE_EXIT, _("Exit") + "\tCTRL-Q")
 
         editMenu = wx.Menu()
-        editMenu.Append(ID_EDIT_UNDO, "(&U) " + _("Undo") + "\tCTRL-Z")
-        editMenu.Append(ID_EDIT_REDO, "(&R) " + _("Redo") + "\tCTRL-Y")
+        editMenu.Append(ID_EDIT_UNDO, _("Undo") + "\tCTRL-Z")
+        editMenu.Append(ID_EDIT_REDO, _("Redo") + "\tCTRL-Y")
         editMenu.AppendSeparator()
-        editMenu.Append(ID_EDIT_CUT, "(&t) " + _("Cut") + "\tCTRL-X")
-        editMenu.Append(ID_EDIT_COPY, "(&C) " + _("Copy") + "\tCTRL-C")
-        editMenu.Append(ID_EDIT_PASTE, "(&P) " + _("Paste") + "\tCTRL-V")
+        editMenu.Append(ID_EDIT_CUT, _("Cut") + "\tCTRL-X")
+        editMenu.Append(ID_EDIT_COPY, _("Copy") + "\tCTRL-C")
+        editMenu.Append(ID_EDIT_PASTE, _("Paste") + "\tCTRL-V")
+        editMenu.AppendSeparator()
+        editMenu.Append(ID_EDIT_FORMAT_BOLD, _("Bold") + "\tCTRL-B")
+        editMenu.Append(ID_EDIT_FORMAT_ITALIC, _("Italic") + "\tALT-I")
+        editMenu.Append(ID_EDIT_FORMAT_UNDERLINE, _("Underline") + "\tCTRL-U")
         editMenu.AppendSeparator()
 
         tmp = wx.Menu()
-        tmp.Append(ID_EDIT_COPY_TO_CB, "(&U) " + _("Unformatted"))
-        tmp.Append(ID_EDIT_COPY_TO_CB_FMT, "(&F) " + _("Formatted"))
+        tmp.Append(ID_EDIT_COPY_TO_CB, _("Unformatted"))
+        tmp.Append(ID_EDIT_COPY_TO_CB_FMT, _("Formatted"))
 
-        editMenu.Append(ID_EDIT_COPY_SYSTEM, "(&o) " + _("Copy (system)"), tmp)
-        editMenu.Append(ID_EDIT_PASTE_FROM_CB, "(&a) " + _("Paste (system)"))
+        editMenu.Append(ID_EDIT_COPY_SYSTEM, _("Copy (system)"), tmp)
+        editMenu.Append(ID_EDIT_PASTE_FROM_CB, _("Paste (system)"))
         editMenu.AppendSeparator()
-        editMenu.Append(ID_EDIT_SELECT_SCENE, "(&S) " + _("Select scene"))
-        editMenu.Append(ID_EDIT_SELECT_ALL, "(&l) " + _("Select all"))
-        editMenu.Append(ID_EDIT_GOTO_PAGE, "(&G) " + _("Goto page") + "...\tCTRL-G")
-        editMenu.Append(ID_EDIT_GOTO_SCENE, "(&e) " + _("Goto scene") + "...\tALT-G")
+        editMenu.Append(ID_EDIT_SELECT_SCENE, _("Select scene"))
+        editMenu.Append(ID_EDIT_SELECT_ALL, _("Select all"))
+        editMenu.Append(ID_EDIT_GOTO_PAGE, _("Goto page") + "...\tCTRL-G")
+        editMenu.Append(ID_EDIT_GOTO_SCENE, _("Goto scene") + "...\tALT-G")
         editMenu.AppendSeparator()
         editMenu.Append(ID_EDIT_INSERT_NBSP, _("Insert non-breaking space"))
         editMenu.AppendSeparator()
-        editMenu.Append(ID_EDIT_FIND, "(&F) " + _("Find && Replace") + "...\tCTRL-F")
+        editMenu.Append(ID_EDIT_FIND, _("Find && Replace") + "...\tCTRL-F")
         editMenu.AppendSeparator()
-        editMenu.Append(ID_EDIT_DELETE_ELEMENTS, "(&D) " + _("Delete elements") + "...")
+        editMenu.Append(ID_EDIT_DELETE_ELEMENTS, _("Delete elements") + "...")
 
         viewMenu = wx.Menu()
-        viewMenu.AppendRadioItem(ID_VIEW_STYLE_DRAFT, "(&D) " + _("Draft"))
-        viewMenu.AppendRadioItem(ID_VIEW_STYLE_LAYOUT, "(&L) " + _("Layout"))
+        viewMenu.AppendRadioItem(ID_VIEW_STYLE_DRAFT, _("Draft"))
+        viewMenu.AppendRadioItem(ID_VIEW_STYLE_LAYOUT, _("Layout"))
         viewMenu.AppendRadioItem(
-            ID_VIEW_STYLE_SIDE_BY_SIDE, "(&S) " + _("Side by side")
+            ID_VIEW_STYLE_SIDE_BY_SIDE, _("Side by side")
         )
-        viewMenu.AppendCheckItem(ID_SHOW_HIDE_TOOLBAR, "(&S) " + _("Show/Hide Toolbar"))
+        viewMenu.AppendCheckItem(ID_SHOW_HIDE_TOOLBAR, _("Show/Hide Toolbar"))
+        themeMenu = wx.Menu()
+        themeMenu.AppendRadioItem(ID_VIEW_THEME_LIGHT, _("Light"))
+        themeMenu.AppendRadioItem(ID_VIEW_THEME_DARK, _("Dark"))
+        themeMenu.AppendRadioItem(ID_VIEW_THEME_SYSTEM, _("System"))
+        themeMenu.AppendRadioItem(ID_VIEW_THEME_SEPIA, _("Sepia"))
+        themeMenu.AppendRadioItem(ID_VIEW_THEME_GRAPHITE, _("Graphite"))
+        themeMenu.AppendRadioItem(ID_VIEW_THEME_MIDNIGHT, _("Midnight"))
+        themeMenu.AppendRadioItem(ID_VIEW_THEME_SOLAR_LIGHT, _("Solarized light"))
+        themeMenu.AppendRadioItem(ID_VIEW_THEME_SOLAR_DARK, _("Solarized dark"))
+        themeMenu.AppendRadioItem(ID_VIEW_THEME_FOREST, _("Forest"))
+        themeMenu.AppendRadioItem(ID_VIEW_THEME_ROSE, _("Rose"))
+        themeMenu.AppendRadioItem(ID_VIEW_THEME_HIGH_CONTRAST, _("High contrast"))
+        themeMenu.AppendRadioItem(ID_VIEW_THEME_PAPER, _("Paper"))
+        viewMenu.AppendSubMenu(themeMenu, _("Theme"))
+        scaleMenu = wx.Menu()
+        self.displayScaleMenuItems = [
+            (ID_VIEW_SCALE_75, 75, _("75%")),
+            (ID_VIEW_SCALE_100, 100, _("100%")),
+            (ID_VIEW_SCALE_110, 110, _("110%")),
+            (ID_VIEW_SCALE_125, 125, _("125%")),
+            (ID_VIEW_SCALE_135, 135, _("135%")),
+            (ID_VIEW_SCALE_150, 150, _("150%")),
+            (ID_VIEW_SCALE_160, 160, _("160%")),
+            (ID_VIEW_SCALE_175, 175, _("175%")),
+            (ID_VIEW_SCALE_200, 200, _("200%")),
+        ]
+        for itemId, scaleValue, label in self.displayScaleMenuItems:
+            scaleMenu.AppendRadioItem(itemId, label)
+        viewMenu.AppendSubMenu(scaleMenu, _("Display scale"))
 
         if gd.viewMode == gd.VIEWMODE_DRAFT:
             viewMenu.Check(ID_VIEW_STYLE_DRAFT, True)
@@ -120,75 +155,124 @@ class MyFrame(wx.Frame):
         else:
             viewMenu.Check(ID_VIEW_STYLE_SIDE_BY_SIDE, True)
 
+        if gd.cfgGl.pageThemeMode == config.THEME_LIGHT:
+            themeMenu.Check(ID_VIEW_THEME_LIGHT, True)
+        elif gd.cfgGl.pageThemeMode == config.THEME_DARK:
+            themeMenu.Check(ID_VIEW_THEME_DARK, True)
+        elif gd.cfgGl.pageThemeMode == config.THEME_SEPIA:
+            themeMenu.Check(ID_VIEW_THEME_SEPIA, True)
+        elif gd.cfgGl.pageThemeMode == config.THEME_GRAPHITE:
+            themeMenu.Check(ID_VIEW_THEME_GRAPHITE, True)
+        elif gd.cfgGl.pageThemeMode == config.THEME_MIDNIGHT:
+            themeMenu.Check(ID_VIEW_THEME_MIDNIGHT, True)
+        elif gd.cfgGl.pageThemeMode == config.THEME_SOLAR_LIGHT:
+            themeMenu.Check(ID_VIEW_THEME_SOLAR_LIGHT, True)
+        elif gd.cfgGl.pageThemeMode == config.THEME_SOLAR_DARK:
+            themeMenu.Check(ID_VIEW_THEME_SOLAR_DARK, True)
+        elif gd.cfgGl.pageThemeMode == config.THEME_FOREST:
+            themeMenu.Check(ID_VIEW_THEME_FOREST, True)
+        elif gd.cfgGl.pageThemeMode == config.THEME_ROSE:
+            themeMenu.Check(ID_VIEW_THEME_ROSE, True)
+        elif gd.cfgGl.pageThemeMode == config.THEME_HIGH_CONTRAST:
+            themeMenu.Check(ID_VIEW_THEME_HIGH_CONTRAST, True)
+        elif gd.cfgGl.pageThemeMode == config.THEME_PAPER:
+            themeMenu.Check(ID_VIEW_THEME_PAPER, True)
+        else:
+            themeMenu.Check(ID_VIEW_THEME_SYSTEM, True)
+
+        try:
+            currentScale = int(gd.cfgGl.displayScale)
+        except (TypeError, ValueError):
+            currentScale = 200
+
+        bestScaleItem = min(
+            self.displayScaleMenuItems, key=lambda item: abs(item[1] - currentScale)
+        )
+        scaleMenu.Check(bestScaleItem[0], True)
+
         viewMenu.AppendSeparator()
         viewMenu.AppendCheckItem(
-            ID_VIEW_SHOW_FORMATTING, "(&S) " + _("Show formatting")
+            ID_VIEW_SHOW_FORMATTING, _("Show formatting")
         )
-        viewMenu.Append(ID_VIEW_FULL_SCREEN, "(&F) " + _("Fullscreen") + "\tF11")
+        viewMenu.Append(ID_VIEW_FULL_SCREEN, _("Fullscreen") + "\tF11")
 
         scriptMenu = wx.Menu()
-        scriptMenu.Append(ID_SCRIPT_FIND_ERROR, "(&F) " + _("Find next error"))
-        scriptMenu.Append(ID_SCRIPT_PAGINATE, "(&P) " + _("Paginate"))
+        scriptMenu.Append(ID_SCRIPT_FIND_ERROR, _("Find next error"))
+        scriptMenu.Append(ID_SCRIPT_PAGINATE, _("Paginate"))
         scriptMenu.AppendSeparator()
         scriptMenu.Append(
-            ID_SCRIPT_AUTO_COMPLETION, "(&A) " + _("Auto-completion") + "..."
+            ID_SCRIPT_AUTO_COMPLETION, _("Auto-completion") + "..."
         )
-        scriptMenu.Append(ID_SCRIPT_HEADERS, "(&H) " + _("Headers") + "...")
-        scriptMenu.Append(ID_SCRIPT_LOCATIONS, "(&L) " + _("Locations") + "...")
-        scriptMenu.Append(ID_SCRIPT_TITLES, "(&T) " + _("Title pages") + "...")
-        scriptMenu.Append(ID_SCRIPT_SC_DICT, "(&S) " + _("Spell checker dictionary..."))
+        scriptMenu.Append(ID_SCRIPT_HEADERS, _("Headers") + "...")
+        scriptMenu.Append(ID_SCRIPT_LOCATIONS, _("Locations") + "...")
+        scriptMenu.Append(ID_SCRIPT_TITLES, _("Title pages") + "...")
+        scriptMenu.Append(ID_SCRIPT_SC_DICT, _("Spell checker dictionary..."))
         scriptMenu.AppendSeparator()
 
         tmp = wx.Menu()
 
-        tmp.Append(ID_SCRIPT_SETTINGS_CHANGE, "(&C) " + _("Change") + "...")
+        tmp.Append(ID_SCRIPT_SETTINGS_CHANGE, _("Change") + "...")
         tmp.AppendSeparator()
-        tmp.Append(ID_SCRIPT_SETTINGS_LOAD, "(&L) " + _("Load") + "...")
-        tmp.Append(ID_SCRIPT_SETTINGS_SAVE_AS, "(&S) " + _("Save as") + "...")
-        scriptMenu.Append(ID_SCRIPT_SETTINGS, "(&S) " + _("Settings"), tmp)
+        tmp.Append(ID_SCRIPT_SETTINGS_LOAD, _("Load") + "...")
+        tmp.Append(ID_SCRIPT_SETTINGS_SAVE_AS, _("Save as") + "...")
+        scriptMenu.Append(ID_SCRIPT_SETTINGS, _("Settings"), tmp)
         scriptSettingsMenu = tmp
 
         reportsMenu = wx.Menu()
-        reportsMenu.Append(ID_REPORTS_SCRIPT_REP, "(&r) " + _("Script report"))
+        reportsMenu.Append(ID_REPORTS_SCRIPT_REP, _("Script report"))
         reportsMenu.Append(
-            ID_REPORTS_LOCATION_REP, "(&L) " + _("Location report") + "..."
+            ID_REPORTS_LOCATION_REP, _("Location report") + "..."
         )
-        reportsMenu.Append(ID_REPORTS_SCENE_REP, "(&S) " + _("Scene report") + "...")
+        reportsMenu.Append(ID_REPORTS_SCENE_REP, _("Scene report") + "...")
         reportsMenu.Append(
-            ID_REPORTS_CHARACTER_REP, "(&C) " + _("Character report") + "..."
+            ID_REPORTS_CHARACTER_REP, _("Character report") + "..."
         )
         reportsMenu.Append(
-            ID_REPORTS_DIALOGUE_CHART, "(&D) " + _("Dialogue chart") + "..."
+            ID_REPORTS_DIALOGUE_CHART, _("Dialogue chart") + "..."
         )
 
         toolsMenu = wx.Menu()
-        toolsMenu.Append(ID_TOOLS_SPELL_CHECK, "(&S) " + _("Spell checker") + "...")
-        toolsMenu.Append(ID_TOOLS_NAME_DB, "(&N) " + _("Name database") + "...")
-        toolsMenu.Append(ID_TOOLS_CHARMAP, "(&C) " + _("Character map") + "...")
+        toolsMenu.Append(ID_TOOLS_SPELL_CHECK, _("Spell checker") + "...")
+        toolsMenu.Append(ID_TOOLS_NAME_DB, _("Name database") + "...")
+        toolsMenu.Append(ID_TOOLS_CHARMAP, _("Character map") + "...")
         toolsMenu.Append(
-            ID_TOOLS_COMPARE_SCRIPTS, "(&o) " + _("Compare scripts") + "..."
+            ID_TOOLS_COMPARE_SCRIPTS, _("Compare scripts") + "..."
         )
         toolsMenu.Append(
-            ID_TOOLS_WATERMARK, "(&G) " + _("Generate watermarked PDFs") + "..."
+            ID_TOOLS_WATERMARK, _("Generate watermarked PDFs") + "..."
         )
 
         helpMenu = wx.Menu()
-        helpMenu.Append(ID_HELP_COMMANDS, "(&C) " + _("Commands") + "...")
-        helpMenu.Append(ID_HELP_MANUAL, "(&M) " + _("Manual"))
+        helpMenu.Append(ID_HELP_COMMANDS, _("Commands") + "...")
+        helpMenu.Append(ID_HELP_MANUAL, _("Manual"))
         helpMenu.AppendSeparator()
-        helpMenu.Append(ID_HELP_ABOUT, "(&A) " + _("About") + "...")
+        helpMenu.Append(ID_HELP_ABOUT, _("About") + "...")
 
         self.menuBar = wx.MenuBar()
-        self.menuBar.Append(fileMenu, "(&F) " + _("File"))
-        self.menuBar.Append(editMenu, "(&E) " + _("Edit"))
-        self.menuBar.Append(viewMenu, "(&V) " + _("View"))
-        self.menuBar.Append(scriptMenu, "(&i) " + _("Script"))
-        self.menuBar.Append(reportsMenu, "(&R) " + _("Reports"))
-        self.menuBar.Append(toolsMenu, "(&l) " + _("Tools"))
-        self.menuBar.Append(helpMenu, "(&H) " + _("Help"))
+        self.menuBar.Append(fileMenu, _("File"))
+        self.menuBar.Append(editMenu, _("Edit"))
+        self.menuBar.Append(viewMenu, _("View"))
+        self.menuBar.Append(scriptMenu, _("Script"))
+        self.menuBar.Append(reportsMenu, _("Reports"))
+        self.menuBar.Append(toolsMenu, _("Tools"))
+        self.menuBar.Append(helpMenu, _("Help"))
         self.SetMenuBar(self.menuBar)
 
-        self.toolBar = self.CreateToolBar(wx.TB_VERTICAL)
+        if misc.isMac:
+            self.applyMacMenuConventions()
+
+        tbStyle = wx.TB_VERTICAL
+        iconSize = wx.Size(32, 32)
+        if misc.isMac:
+            tbStyle = wx.TB_HORIZONTAL | wx.TB_FLAT | wx.TB_NODIVIDER
+            iconSize = wx.Size(20, 20)
+
+        self.toolBar = self.CreateToolBar(tbStyle)
+        self.toolBar.SetToolBitmapSize(iconSize)
+        self.toolBar.SetBackgroundColour(gd.cfgGui.tabBarBgColor)
+        if misc.isMac and hasattr(self.toolBar, "SetMargins"):
+            self.toolBar.SetMargins((8, 6))
+            self.toolBar.SetToolPacking(8)
 
         def addTB(id, iconFilename, toolTip):
             filepath = misc.getFullPath(("trelby/resources/%s" % iconFilename))
@@ -199,10 +283,13 @@ class MyFrame(wx.Frame):
 
             if wx.SystemSettings.GetAppearance().IsDark():
                 svg_content = svg_content.replace("fill:#000000", "fill:#CCCCCC")
+            else:
+                # Use a softer gray for light mode instead of harsh black
+                svg_content = svg_content.replace("fill:#000000", "fill:#444444")
             svg_content = svg_content.encode()
 
             # svg_image = wx.svg.SVGimage.CreateFromBytes(svg_content)
-            bitmap = wx.BitmapBundle.FromSVG(svg_content, wx.Size(32, 32))
+            bitmap = wx.BitmapBundle.FromSVG(svg_content, iconSize)
 
             self.toolBar.AddTool(
                 id,
@@ -237,14 +324,13 @@ class MyFrame(wx.Frame):
         addTB(ID_TOOLBAR_TOOLS, "tools.svg", _("Tools"))
         addTB(ID_TOOLBAR_SETTINGS, "settings.svg", _("Global settings"))
 
-        self.toolBar.SetBackgroundColour(gd.cfgGui.tabBarBgColor)
         self.toolBar.Realize()
 
         self.Bind(wx.EVT_MOVE, self.OnMove)
         self.Bind(wx.EVT_SIZE, self.OnSize)
 
-        vsizer = wx.BoxSizer(wx.VERTICAL)
-        self.SetSizer(vsizer)
+        rootSizer = wx.BoxSizer(wx.VERTICAL)
+        self.SetSizer(rootSizer)
 
         hsizer = wx.BoxSizer(wx.HORIZONTAL)
 
@@ -261,12 +347,23 @@ class MyFrame(wx.Frame):
         self.statusCtrl = misc.MyStatus(self, -1, self.getCfgGui)
         hsizer.Add(self.statusCtrl)
 
-        vsizer.Add(hsizer, 0, wx.EXPAND)
+        if misc.isMac:
+            rootSizer.Add(hsizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 8)
+        else:
+            rootSizer.Add(hsizer, 0, wx.EXPAND)
 
         tmp = misc.MyTabCtrl2(self, -1, self.tabCtrl)
-        vsizer.Add(tmp, 1, wx.EXPAND)
+        if misc.isMac:
+            rootSizer.Add(tmp, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
+        else:
+            rootSizer.Add(tmp, 1, wx.EXPAND)
 
-        vsizer.Add(wx.StaticLine(self, -1), 0, wx.EXPAND)
+        if misc.isMac:
+            rootSizer.Add(
+                wx.StaticLine(self, -1), 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 8
+            )
+        else:
+            rootSizer.Add(wx.StaticLine(self, -1), 0, wx.EXPAND)
 
         gd.mru.useMenu(fileMenu, 14)
 
@@ -281,15 +378,15 @@ class MyFrame(wx.Frame):
         for m in (self.rightClickMenu, self.rightClickMenuWithCut):
             tmp = wx.Menu()
 
-            tmp.Append(ID_ELEM_TO_SCENE, "(&S) " + _("Scene"))
-            tmp.Append(ID_ELEM_TO_ACTION, "(&A) " + _("Action"))
-            tmp.Append(ID_ELEM_TO_CHARACTER, "(&C) " + _("Character"))
-            tmp.Append(ID_ELEM_TO_PAREN, "(&P) " + _("Parenthetical"))
-            tmp.Append(ID_ELEM_TO_DIALOGUE, "(&D) " + _("Dialogue"))
-            tmp.Append(ID_ELEM_TO_TRANSITION, "(&T) " + _("Transition"))
-            tmp.Append(ID_ELEM_TO_SHOT, "(&o) " + _("Shot"))
-            tmp.Append(ID_ELEM_TO_ACTBREAK, "(&b) " + _("Act break"))
-            tmp.Append(ID_ELEM_TO_NOTE, "(&N) " + _("Note"))
+            tmp.Append(ID_ELEM_TO_SCENE, _("Scene"))
+            tmp.Append(ID_ELEM_TO_ACTION, _("Action"))
+            tmp.Append(ID_ELEM_TO_CHARACTER, _("Character"))
+            tmp.Append(ID_ELEM_TO_PAREN, _("Parenthetical"))
+            tmp.Append(ID_ELEM_TO_DIALOGUE, _("Dialogue"))
+            tmp.Append(ID_ELEM_TO_TRANSITION, _("Transition"))
+            tmp.Append(ID_ELEM_TO_SHOT, _("Shot"))
+            tmp.Append(ID_ELEM_TO_ACTBREAK, _("Act break"))
+            tmp.Append(ID_ELEM_TO_NOTE, _("Note"))
 
             m.AppendSubMenu(tmp, _("Element type"))
             m.AppendSeparator()
@@ -321,6 +418,9 @@ class MyFrame(wx.Frame):
             self.Bind(wx.EVT_MENU, self.OnCut, id=ID_EDIT_CUT)
             self.Bind(wx.EVT_MENU, self.OnCopy, id=ID_EDIT_COPY)
             self.Bind(wx.EVT_MENU, self.OnPaste, id=ID_EDIT_PASTE)
+            self.Bind(wx.EVT_MENU, self.OnFormatBold, id=ID_EDIT_FORMAT_BOLD)
+            self.Bind(wx.EVT_MENU, self.OnFormatItalic, id=ID_EDIT_FORMAT_ITALIC)
+            self.Bind(wx.EVT_MENU, self.OnFormatUnderline, id=ID_EDIT_FORMAT_UNDERLINE)
             self.Bind(wx.EVT_MENU, self.OnCopySystemCb, id=ID_EDIT_COPY_TO_CB)
             self.Bind(
                 wx.EVT_MENU, self.OnCopySystemCbFormatted, id=ID_EDIT_COPY_TO_CB_FMT
@@ -337,6 +437,26 @@ class MyFrame(wx.Frame):
             self.Bind(wx.EVT_MENU, self.ShowHideToolbar, id=ID_SHOW_HIDE_TOOLBAR)
             self.Bind(wx.EVT_MENU, self.OnViewModeChange, id=ID_VIEW_STYLE_LAYOUT)
             self.Bind(wx.EVT_MENU, self.OnViewModeChange, id=ID_VIEW_STYLE_SIDE_BY_SIDE)
+            self.Bind(wx.EVT_MENU, self.OnThemeModeChange, id=ID_VIEW_THEME_LIGHT)
+            self.Bind(wx.EVT_MENU, self.OnThemeModeChange, id=ID_VIEW_THEME_DARK)
+            self.Bind(wx.EVT_MENU, self.OnThemeModeChange, id=ID_VIEW_THEME_SYSTEM)
+            self.Bind(wx.EVT_MENU, self.OnThemeModeChange, id=ID_VIEW_THEME_SEPIA)
+            self.Bind(wx.EVT_MENU, self.OnThemeModeChange, id=ID_VIEW_THEME_GRAPHITE)
+            self.Bind(wx.EVT_MENU, self.OnThemeModeChange, id=ID_VIEW_THEME_MIDNIGHT)
+            self.Bind(
+                wx.EVT_MENU, self.OnThemeModeChange, id=ID_VIEW_THEME_SOLAR_LIGHT
+            )
+            self.Bind(
+                wx.EVT_MENU, self.OnThemeModeChange, id=ID_VIEW_THEME_SOLAR_DARK
+            )
+            self.Bind(wx.EVT_MENU, self.OnThemeModeChange, id=ID_VIEW_THEME_FOREST)
+            self.Bind(wx.EVT_MENU, self.OnThemeModeChange, id=ID_VIEW_THEME_ROSE)
+            self.Bind(
+                wx.EVT_MENU, self.OnThemeModeChange, id=ID_VIEW_THEME_HIGH_CONTRAST
+            )
+            self.Bind(wx.EVT_MENU, self.OnThemeModeChange, id=ID_VIEW_THEME_PAPER)
+            for itemId, scaleValue, label in self.displayScaleMenuItems:
+                self.Bind(wx.EVT_MENU, self.OnDisplayScaleChange, id=itemId)
             self.Bind(wx.EVT_MENU, self.OnShowFormatting, id=ID_VIEW_SHOW_FORMATTING)
             self.Bind(wx.EVT_MENU, self.ToggleFullscreen, id=ID_VIEW_FULL_SCREEN)
             self.Bind(wx.EVT_MENU, self.OnFindNextError, id=ID_SCRIPT_FIND_ERROR)
@@ -403,12 +523,56 @@ class MyFrame(wx.Frame):
 
         self.Layout()
 
+    def applyModernWindowStyle(self):
+        if not misc.isMac:
+            return
+
+        uiFont = wx.SystemSettings.GetFont(wx.SYS_DEFAULT_GUI_FONT)
+        if uiFont.IsOk():
+            uiFont.SetPointSize(max(uiFont.GetPointSize(), 13))
+            self.SetFont(uiFont)
+
+        self.SetBackgroundColour(self.gd.cfgGui.workspaceColor)
+
+    @staticmethod
+    def stripMacMenuMnemonic(label):
+        base, sep, accel = label.partition("\t")
+
+        base = re.sub(r"^\(&.\)\s*", "", base)
+        base = re.sub(r"^\(.\)\s*", "", base)
+
+        if sep:
+            return base + "\t" + accel
+        else:
+            return base
+
+    def applyMacMenuConventionsToMenu(self, menu):
+        for item in menu.GetMenuItems():
+            if item.IsSeparator():
+                continue
+
+            item.SetItemLabel(self.stripMacMenuMnemonic(item.GetItemLabel()))
+
+            subMenu = item.GetSubMenu()
+            if subMenu:
+                self.applyMacMenuConventionsToMenu(subMenu)
+
+    def applyMacMenuConventions(self):
+        if not misc.isMac:
+            return
+
+        for i in range(self.menuBar.GetMenuCount()):
+            menuLabel = self.menuBar.GetMenuLabel(i)
+            self.menuBar.SetMenuLabel(i, self.stripMacMenuMnemonic(menuLabel))
+            self.applyMacMenuConventionsToMenu(self.menuBar.GetMenu(i))
+
     def init(self):
         self.updateKbdCommands()
         self.panel = self.createNewPanel()
 
     def mySetIcons(self):
-        wx.Image.AddHandler(wx.PNGHandler())
+        if not wx.Image.FindHandler(wx.BITMAP_TYPE_PNG):
+            wx.Image.AddHandler(wx.PNGHandler())
 
         ib = wx.IconBundle()
 
@@ -745,6 +909,15 @@ class MyFrame(wx.Frame):
     def OnPasteSystemCb(self, event=None):
         self.panel.ctrl.OnPasteSystemCb()
 
+    def OnFormatBold(self, event=None):
+        self.panel.ctrl.OnFormatBold()
+
+    def OnFormatItalic(self, event=None):
+        self.panel.ctrl.OnFormatItalic()
+
+    def OnFormatUnderline(self, event=None):
+        self.panel.ctrl.OnFormatUnderline()
+
     def OnSelectScene(self, event=None):
         self.panel.ctrl.OnSelectScene()
 
@@ -818,9 +991,79 @@ class MyFrame(wx.Frame):
         c.makeLineVisible(c.sp.line)
         c.updateScreen()
 
+    def OnThemeModeChange(self, event=None):
+        if self.menuBar.IsChecked(ID_VIEW_THEME_LIGHT):
+            self.gd.cfgGl.pageThemeMode = config.THEME_LIGHT
+        elif self.menuBar.IsChecked(ID_VIEW_THEME_DARK):
+            self.gd.cfgGl.pageThemeMode = config.THEME_DARK
+        elif self.menuBar.IsChecked(ID_VIEW_THEME_SEPIA):
+            self.gd.cfgGl.pageThemeMode = config.THEME_SEPIA
+        elif self.menuBar.IsChecked(ID_VIEW_THEME_GRAPHITE):
+            self.gd.cfgGl.pageThemeMode = config.THEME_GRAPHITE
+        elif self.menuBar.IsChecked(ID_VIEW_THEME_MIDNIGHT):
+            self.gd.cfgGl.pageThemeMode = config.THEME_MIDNIGHT
+        elif self.menuBar.IsChecked(ID_VIEW_THEME_SOLAR_LIGHT):
+            self.gd.cfgGl.pageThemeMode = config.THEME_SOLAR_LIGHT
+        elif self.menuBar.IsChecked(ID_VIEW_THEME_SOLAR_DARK):
+            self.gd.cfgGl.pageThemeMode = config.THEME_SOLAR_DARK
+        elif self.menuBar.IsChecked(ID_VIEW_THEME_FOREST):
+            self.gd.cfgGl.pageThemeMode = config.THEME_FOREST
+        elif self.menuBar.IsChecked(ID_VIEW_THEME_ROSE):
+            self.gd.cfgGl.pageThemeMode = config.THEME_ROSE
+        elif self.menuBar.IsChecked(ID_VIEW_THEME_HIGH_CONTRAST):
+            self.gd.cfgGl.pageThemeMode = config.THEME_HIGH_CONTRAST
+        elif self.menuBar.IsChecked(ID_VIEW_THEME_PAPER):
+            self.gd.cfgGl.pageThemeMode = config.THEME_PAPER
+        else:
+            self.gd.cfgGl.pageThemeMode = config.THEME_SYSTEM
+
+        self.gd.cfgGui = config.ConfigGui(self.gd.cfgGl)
+
+        for ctrl in self.getCtrls():
+            ctrl.updateScreen()
+
+        self.toolBar.SetBackgroundColour(self.gd.cfgGui.tabBarBgColor)
+        self.SetBackgroundColour(self.gd.cfgGui.workspaceColor)
+        self.tabCtrl.Refresh(False)
+        self.statusCtrl.Refresh(False)
+        self.noFSBtn.Refresh(False)
+        self.toolBar.Refresh()
+        self.Refresh(False)
+
+        util.writeToFile(self.gd.confFilename, self.gd.cfgGl.save(), self)
+
+    def OnDisplayScaleChange(self, event=None):
+        for itemId, scale, label in self.displayScaleMenuItems:
+            if self.menuBar.IsChecked(itemId):
+                self.gd.cfgGl.displayScale = scale
+                break
+
+        self.gd.cfgGui = config.ConfigGui(self.gd.cfgGl)
+
+        for ctrl in self.getCtrls():
+            ctrl.refreshCache()
+            ctrl.makeLineVisible(ctrl.sp.line)
+            ctrl.adjustScrollBar()
+            ctrl.updateScreen()
+
+        self.toolBar.SetBackgroundColour(self.gd.cfgGui.tabBarBgColor)
+        self.SetBackgroundColour(self.gd.cfgGui.workspaceColor)
+        self.tabCtrl.Refresh(False)
+        self.statusCtrl.Refresh(False)
+        self.noFSBtn.Refresh(False)
+        self.toolBar.Refresh()
+        self.Refresh(False)
+
+        util.writeToFile(self.gd.confFilename, self.gd.cfgGl.save(), self)
+
     def ToggleFullscreen(self, event=None):
         self.noFSBtn.Show(not self.IsFullScreen())
-        self.ShowFullScreen(not self.IsFullScreen(), wx.FULLSCREEN_ALL)
+
+        flags = wx.FULLSCREEN_ALL
+        if misc.isMac:
+            flags &= ~wx.FULLSCREEN_NOMENUBAR
+
+        self.ShowFullScreen(not self.IsFullScreen(), flags)
         self.panel.ctrl.SetFocus()
 
     def OnPaginate(self, event=None):
@@ -967,7 +1210,7 @@ class MyFrame(wx.Frame):
                 _("Save Changes"),
                 wx.YES_NO | wx.CANCEL | wx.YES_DEFAULT,
             )
-            close_msg_box.SetYesNoLabels(wx.ID_SAVE, "(&D) " + _("Don't save"))
+            close_msg_box.SetYesNoLabels(wx.ID_SAVE, _("Don't save"))
             response = close_msg_box.ShowModal()
             if response == wx.ID_YES:
                 self.OnSave()

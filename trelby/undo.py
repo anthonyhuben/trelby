@@ -241,7 +241,7 @@ class AnyDifference(Base):
     def __init__(self, sp):
         Base.__init__(self, sp, CMD_MISC)
 
-        self.linesBefore = [Line(ln.lb, ln.lt, ln.text) for ln in sp.lines]
+        self.linesBefore = [Line(ln.lb, ln.lt, ln.text, ln.styles) for ln in sp.lines]
 
     def setAfter(self, sp):
         self.a, self.b, self.x, self.y = mySequenceMatcher(self.linesBefore, sp.lines)

@@ -15,13 +15,13 @@ if "TRELBY_TESTING" in os.environ:
 else:
     import wx
 
-TAB_BAR_HEIGHT = 24
+TAB_BAR_HEIGHT = 30
 
 version = "2.4.16.2"
 
 
 def init(doWX=True):
-    global isWindows, isUnix, isMac, unicodeFS, doDblBuf, progPath, confPath, tmpPrefix
+    global isWindows, isUnix, isMac, unicodeFS, doDblBuf, progPath, confPath, tmpPrefix, TAB_BAR_HEIGHT
 
     # prefix used for temp files
     tmpPrefix = "trelby-tmp-"
@@ -35,6 +35,9 @@ def init(doWX=True):
     else:
         isUnix = True
         isMac = sys.platform == "darwin"
+
+    # A slightly taller top chrome fits macOS typography and spacing better.
+    TAB_BAR_HEIGHT = 34 if isMac else 30
 
     # does this platform support using Python's unicode strings in various
     # filesystem calls; if not, we need to convert filenames to UTF-8
@@ -135,16 +138,22 @@ class MyFSButton(wx.Window):
 
     def OnPaint(self, event):
         cfgGui = self.getCfgGui()
-        dc = wx.PaintDC(self)
+        dc = wx.AutoBufferedPaintDCFactory(self)
 
         w, h = self.GetClientSize()
-
-        dc.SetBrush(cfgGui.tabNonActiveBgBrush)
-        dc.SetPen(cfgGui.tabBorderPen)
+        dc.SetBrush(cfgGui.tabBarBgBrush)
+        dc.SetPen(cfgGui.tabBarBgPen)
         dc.DrawRectangle(0, 0, w, h)
 
-        off = (h - self.fsImage.GetHeight()) // 2
-        dc.DrawBitmap(self.fsImage, off, off)
+        inset = 5 if isMac else 4
+        dc.SetBrush(cfgGui.tabNonActiveBgBrush)
+        dc.SetPen(cfgGui.tabBorderPen)
+        radius = 9 if isMac else 6
+        dc.DrawRoundedRectangle(inset, inset, w - inset * 2, h - inset * 2, radius)
+
+        offX = (w - self.fsImage.GetWidth()) // 2
+        offY = (h - self.fsImage.GetHeight()) // 2
+        dc.DrawBitmap(self.fsImage, offX, offY)
 
     def OnMouseDown(self, event):
         clickEvent = wx.CommandEvent(wx.wxEVT_COMMAND_BUTTON_CLICKED, self.GetId())
@@ -154,8 +163,7 @@ class MyFSButton(wx.Window):
 
 # custom status control
 class MyStatus(wx.Window):
-    WIDTH = 280
-    X_ELEDIVIDER = 100
+    WIDTH = 360
 
     def __init__(self, parent, id, getCfgGui):
         wx.Window.__init__(
@@ -175,11 +183,11 @@ class MyStatus(wx.Window):
         self.enterNext = ""
 
         self.elementFont = util.createPixelFont(
-            TAB_BAR_HEIGHT // 2 + 6, wx.FONTFAMILY_DEFAULT, wx.NORMAL, wx.NORMAL
+            TAB_BAR_HEIGHT // 2 + 2, wx.FONTFAMILY_DEFAULT, wx.NORMAL, wx.BOLD
         )
 
         self.font = util.createPixelFont(
-            TAB_BAR_HEIGHT // 2 + 2, wx.FONTFAMILY_DEFAULT, wx.NORMAL, wx.NORMAL
+            TAB_BAR_HEIGHT // 2 - 1, wx.FONTFAMILY_DEFAULT, wx.NORMAL, wx.NORMAL
         )
 
         self.Bind(wx.EVT_PAINT, self.OnPaint)
@@ -188,47 +196,66 @@ class MyStatus(wx.Window):
         cfgGui = self.getCfgGui()
 
         cy = (TAB_BAR_HEIGHT - 1) // 2
-        xoff = 5
 
-        dc = wx.PaintDC(self)
+        dc = wx.AutoBufferedPaintDCFactory(self)
         w, h = self.GetClientSize()
-
         dc.SetBrush(cfgGui.tabBarBgBrush)
         dc.SetPen(cfgGui.tabBarBgPen)
         dc.DrawRectangle(0, 0, w, h)
+
+        if isMac:
+            dc.SetPen(cfgGui.tabBorderPen)
+            separatorLineThickness = cfgGui.tabBorderPen.GetWidth()
+            dc.DrawLine(0, 0, w, 0)
 
         dc.SetPen(cfgGui.tabTextPen)
         dc.SetTextForeground(cfgGui.tabTextColor)
 
         pageText = "Page %d / %d" % (self.page, self.pageCnt)
         dc.SetFont(self.font)
+        pageTextW = util.getTextExtent(self.font, pageText)[0]
+
+        leftPad = 18 if isMac else 14
+        rightPad = 12 if isMac else 10
+        tokenGap = 10
+
+        pageX = w - rightPad - pageTextW
+        leftMaxX = pageX - 12
+        if leftMaxX > leftPad:
+            dc.SetClippingRegion(leftPad, 0, leftMaxX - leftPad, h)
+
+            x = leftPad
+            dc.SetFont(self.elementFont)
+            util.drawText(dc, "%s" % self.elemType, x, cy, valign=util.VALIGN_CENTER)
+            x += util.getTextExtent(self.elementFont, self.elemType)[0] + tokenGap
+
+            dc.SetFont(self.font)
+            y = 8 if isMac else 5
+            enterLabel = "%s [Enter]" % self.enterNext
+            tabLabel = "%s [Tab]" % self.tabNext
+            enterW = util.getTextExtent(self.font, enterLabel)[0]
+            tabW = util.getTextExtent(self.font, tabLabel)[0]
+
+            if (x + enterW) <= leftMaxX:
+                dc.DrawText(enterLabel, x, y)
+                x += enterW + tokenGap
+
+            if (x + tabW) <= leftMaxX:
+                dc.DrawText(tabLabel, x, y)
+
+            dc.DestroyClippingRegion()
 
         util.drawText(
             dc,
             pageText,
-            MyStatus.WIDTH - xoff,
+            w - rightPad,
             cy,
             util.ALIGN_RIGHT,
             util.VALIGN_CENTER,
         )
 
-        s1 = "%s [Enter]" % self.enterNext
-        s2 = "%s [Tab]" % self.tabNext
-
-        x = MyStatus.X_ELEDIVIDER + xoff
-        dc.DrawText(s1, x, 0)
-        dc.DrawText(s2, x, cy)
-
-        x = xoff
-        s = "%s" % self.elemType
-        dc.SetFont(self.elementFont)
-        util.drawText(dc, s, x, cy, valign=util.VALIGN_CENTER)
-
         dc.SetPen(cfgGui.tabBorderPen)
         dc.DrawLine(0, h - 1, w, h - 1)
-
-        for x in (MyStatus.X_ELEDIVIDER, 0):
-            dc.DrawLine(x, 0, x, h - 1)
 
     def SetValues(self, page, pageCnt, elemType, tabNext, enterNext):
         self.page = page
@@ -264,23 +291,25 @@ class MyTabCtrl(wx.Window):
 
         # how much padding to leave horizontally at the ends of the
         # control, and within each tab
-        self.paddingX = 10
+        self.paddingX = 14 if isMac else 12
 
         # starting Y-pos of text in labels
-        self.textY = 5
+        self.textY = 8 if isMac else 7
 
         # width of a single tab
-        self.tabWidth = 150
+        self.tabWidth = 210 if isMac else 184
 
         # width, height, spacing, y-pos of arrows
         self.arrowWidth = 8
-        self.arrowHeight = 13
-        self.arrowSpacing = 3
-        self.arrowY = 5
+        self.arrowHeight = 10 if isMac else 12
+        self.arrowSpacing = 6 if isMac else 3
+        self.arrowY = 12 if isMac else 9
 
         # initialized in OnPaint since we don't know our height yet
         self.font = None
         self.boldFont = None
+        self.hoverTab = -1
+        self.hoverClose = False
 
         self.SetMinSize(
             wx.Size(
@@ -295,8 +324,98 @@ class MyTabCtrl(wx.Window):
 
         self.Bind(wx.EVT_LEFT_DOWN, self.OnLeftDown)
         self.Bind(wx.EVT_LEFT_DCLICK, self.OnLeftDown)
+        self.Bind(wx.EVT_MOTION, self.OnMotion)
+        self.Bind(wx.EVT_LEAVE_WINDOW, self.OnMouseLeave)
         self.Bind(wx.EVT_PAINT, self.OnPaint)
         self.Bind(wx.EVT_ERASE_BACKGROUND, self.OnEraseBackground)
+
+    def getTabDrawMetrics(self):
+        h = self.GetClientSize()[1]
+        tabW = self.tabWidth
+        tabH = h - (8 if isMac else 4)
+        tabY = 4 if isMac else 2
+        return tabW, tabH, tabY
+
+    def getTabCloseRect(self, xpos, tabY, tabH):
+        if not isMac:
+            return None
+
+        closeX = xpos + self.tabWidth - self.paddingX * 2 - 2
+        closeY = tabY + (tabH - 12) // 2
+        return (closeX, closeY, 12, 12)
+
+    def drawCloseGlyph(self, dc, closeX, closeY, color):
+        dc.SetPen(wx.Pen(color, width=2))
+        dc.DrawLine(closeX + 4, closeY + 4, closeX + 8, closeY + 8)
+        dc.DrawLine(closeX + 8, closeY + 4, closeX + 4, closeY + 8)
+
+    def elideTabText(self, label, maxWidth):
+        if maxWidth <= 0:
+            return ""
+
+        if util.getTextExtent(self.font, label)[0] <= maxWidth:
+            return label
+
+        ellipsis = "..."
+        ellipsisW = util.getTextExtent(self.font, ellipsis)[0]
+        if ellipsisW >= maxWidth:
+            return ellipsis
+
+        end = len(label)
+        while end > 0:
+            candidate = label[:end] + ellipsis
+            if util.getTextExtent(self.font, candidate)[0] <= maxWidth:
+                return candidate
+            end -= 1
+
+        return ellipsis
+
+    def hitTest(self, x, y):
+        if x < self.paddingX:
+            return ("none", None, False)
+
+        w = self.GetClientSize()[0]
+        tabW, tabH, tabY = self.getTabDrawMetrics()
+
+        # start of left arrow
+        lx = (
+            w
+            - 1
+            - self.paddingX
+            - self.arrowWidth
+            - self.arrowSpacing
+            - self.arrowWidth
+            + 1
+        )
+
+        if x >= lx:
+            if x < (lx + self.arrowWidth):
+                return ("left-arrow", None, False)
+
+            rx = lx + self.arrowWidth + self.arrowSpacing
+            if (x >= rx) and (x < (rx + self.arrowWidth)):
+                return ("right-arrow", None, False)
+
+            return ("none", None, False)
+
+        if (y < tabY) or (y > (tabY + tabH)):
+            return ("none", None, False)
+
+        page, pageOffset = divmod(x - self.paddingX, tabW)
+        page += self.firstTab
+
+        if (page < self.firstTab) or (page > self.getLastVisibleTab()) or (page >= len(self.pages)):
+            return ("none", None, False)
+
+        hitClose = pageOffset >= (tabW - self.paddingX * 2)
+        if isMac:
+            xpos = self.paddingX + (page - self.firstTab) * tabW
+            rect = self.getTabCloseRect(xpos, tabY, tabH)
+            if rect:
+                cx, cy, cw, ch = rect
+                hitClose = (x >= cx) and (x <= (cx + cw)) and (y >= cy) and (y <= (cy + ch))
+
+        return ("tab", page, hitClose)
 
     # get the ctrl that the tabbed windows should use as a parent
     def getTabParent(self):
@@ -412,56 +531,51 @@ class MyTabCtrl(wx.Window):
         self.pageChangeFunc = func
 
     def OnLeftDown(self, event):
-        x = event.GetPosition().x
+        x, y = event.GetPosition().x, event.GetPosition().y
+        hitType, page, hitClose = self.hitTest(x, y)
 
-        if x < self.paddingX:
+        if hitType == "left-arrow":
+            self.scroll(-1)
             return
 
-        w = self.GetClientSize()[0]
-
-        # start of left arrow
-        lx = (
-            w
-            - 1
-            - self.paddingX
-            - self.arrowWidth
-            - self.arrowSpacing
-            - self.arrowWidth
-            + 1
-        )
-
-        if x < lx:
-            page, pageOffset = divmod(x - self.paddingX, self.tabWidth)
-            page += self.firstTab
-
-            if page < len(self.pages):
-                hitX = pageOffset >= (self.tabWidth - self.paddingX * 2)
-
-                if hitX:
-                    panel = self.pages[page][0]
-                    if not panel.ctrl.canBeClosed():
-                        return
-
-                    if self.getPageCount() > 1:
-                        self.deletePage(page)
-                    else:
-                        panel.ctrl.createEmptySp()
-                        panel.ctrl.updateScreen()
-                else:
-                    self.selectPage(page)
-        else:
-            if x < (lx + self.arrowWidth):
-                self.scroll(-1)
-
-            # start of right arrow
-            rx = lx + self.arrowWidth + self.arrowSpacing
-
-            if (
-                (x >= rx)
-                and (x < (rx + self.arrowWidth))
-                and (self.getLastVisibleTab() < (len(self.pages) - 1))
-            ):
+        if hitType == "right-arrow":
+            if self.getLastVisibleTab() < (len(self.pages) - 1):
                 self.scroll(1)
+            return
+
+        if hitType != "tab":
+            return
+
+        if hitClose:
+            panel = self.pages[page][0]
+            if not panel.ctrl.canBeClosed():
+                return
+
+            if self.getPageCount() > 1:
+                self.deletePage(page)
+            else:
+                panel.ctrl.createEmptySp()
+                panel.ctrl.updateScreen()
+        else:
+            self.selectPage(page)
+
+    def OnMotion(self, event):
+        x, y = event.GetPosition().x, event.GetPosition().y
+        hitType, page, hitClose = self.hitTest(x, y)
+
+        newHoverTab = page if hitType == "tab" else -1
+        newHoverClose = bool(hitType == "tab" and hitClose)
+
+        if (newHoverTab != self.hoverTab) or (newHoverClose != self.hoverClose):
+            self.hoverTab = newHoverTab
+            self.hoverClose = newHoverClose
+            self.Refresh(False)
+
+    def OnMouseLeave(self, event):
+        if (self.hoverTab != -1) or self.hoverClose:
+            self.hoverTab = -1
+            self.hoverClose = False
+            self.Refresh(False)
 
     def OnEraseBackground(self, event):
         pass
@@ -484,8 +598,8 @@ class MyTabCtrl(wx.Window):
         xpos = self.paddingX
 
         tabW = self.tabWidth
-        tabH = h - 2
-        tabY = h - tabH
+        tabH = h - (8 if isMac else 4)
+        tabY = 4 if isMac else 2
 
         if not self.font:
             textH = h - self.textY - 1
@@ -503,51 +617,53 @@ class MyTabCtrl(wx.Window):
             p = self.pages[i]
 
             if i == self.selected:
-                points = (
-                    (0, tabH),
-                    (4, 2),
-                    (6, 1),
-                    (tabW - 8, 1),
-                    (tabW - 6, 2),
-                    (tabW - 2, tabH),
-                )
                 dc.SetBrush(cfgGui.workspaceBrush)
             else:
-                points = (
-                    (0, tabH - separatorLineThickness),
-                    (3, 3),
-                    (5, 2),
-                    (tabW - 8, 2),
-                    (tabW - 6, 3),
-                    (tabW - 2, tabH - separatorLineThickness),
-                )  # subtract its thickness to not cover the separator line
                 dc.SetBrush(cfgGui.tabNonActiveBgBrush)
 
-            dc.DestroyClippingRegion()
-
-            # draw tab background
-            dc.SetClippingRegion(xpos, tabY, tabW, tabH)
-            dc.SetPen(wx.Pen(wx.NullPen))
-            dc.DrawPolygon(points, xpos, tabY)
-
-            # draw tab borders
-            dc.SetClippingRegion(
-                xpos, tabY, tabW, tabH - separatorLineThickness
-            )  # tab borders should never cross the seperator line
             dc.SetPen(cfgGui.tabBorderPen)
-            dc.DrawLines(points, xpos, tabY)
+            radius = 11 if isMac else 8
+            dc.DrawRoundedRectangle(xpos, tabY, tabW - 2, tabH, radius)
 
-            # clip the text to fit within the tabs
-            dc.DestroyClippingRegion()
-            dc.SetClippingRegion(xpos, tabY, tabW - self.paddingX * 3, tabH)
+            if isMac and (i == self.hoverTab) and (i != self.selected):
+                hoverColor = wx.Colour(
+                    min(255, cfgGui.tabNonActiveBgColor.Red() + 10),
+                    min(255, cfgGui.tabNonActiveBgColor.Green() + 10),
+                    min(255, cfgGui.tabNonActiveBgColor.Blue() + 10),
+                )
+                dc.SetPen(cfgGui.tabBorderPen)
+                dc.SetBrush(wx.Brush(hoverColor))
+                dc.DrawRoundedRectangle(xpos, tabY, tabW - 2, tabH, radius)
+
+
+
+            textClipW = tabW - self.paddingX * 3
+            if isMac:
+                textClipW -= 16
+            textAvailW = textClipW - (self.paddingX - 2)
+            label = self.elideTabText(p[1], textAvailW)
+
+            dc.SetClippingRegion(xpos + 2, tabY + 1, textClipW, tabH)
 
             dc.SetPen(cfgGui.tabTextPen)
             dc.SetTextForeground(cfgGui.tabTextColor)
-            dc.DrawText(p[1], xpos + self.paddingX, self.textY)
+            dc.DrawText(label, xpos + self.paddingX, self.textY)
 
             dc.DestroyClippingRegion()
-            dc.SetFont(self.boldFont)
-            dc.DrawText("x", xpos + tabW - self.paddingX * 2, self.textY)
+            if isMac:
+                if i == self.hoverTab:
+                    closeX, closeY, _, _ = self.getTabCloseRect(xpos, tabY, tabH)
+                    if self.hoverClose:
+                        dc.SetPen(cfgGui.tabTextPen)
+                        dc.SetBrush(wx.Brush(cfgGui.tabTextColor))
+                        dc.DrawCircle(closeX + 6, closeY + 6, 6)
+                    if self.hoverClose:
+                        self.drawCloseGlyph(dc, closeX, closeY, cfgGui.tabBarBgColor)
+                    else:
+                        self.drawCloseGlyph(dc, closeX, closeY, cfgGui.tabTextColor)
+            else:
+                dc.SetFont(self.boldFont)
+                dc.DrawText("x", xpos + tabW - self.paddingX * 2, self.textY)
 
             xpos += tabW
 
@@ -558,39 +674,24 @@ class MyTabCtrl(wx.Window):
             dc.DestroyClippingRegion()
             dc.SetPen(cfgGui.tabTextPen)
 
-            util.drawLine(
-                dc, rx - self.arrowSpacing - 1, self.arrowY, 0, self.arrowHeight
+            p1 = (rx - self.arrowSpacing, self.arrowY + self.arrowHeight // 2)
+            p2 = (rx - self.arrowSpacing + self.arrowWidth - 1, self.arrowY)
+            p3 = (
+                rx - self.arrowSpacing + self.arrowWidth - 1,
+                self.arrowY + self.arrowHeight,
             )
-            util.drawLine(
-                dc,
-                rx - self.arrowSpacing - 2,
-                self.arrowY,
-                -self.arrowWidth + 1,
-                self.arrowHeight // 2 + 1,
-            )
-            util.drawLine(
-                dc,
-                rx - self.arrowSpacing - self.arrowWidth,
-                self.arrowY + self.arrowHeight // 2,
-                self.arrowWidth - 1,
-                self.arrowHeight // 2 + 1,
-            )
+            dc.SetBrush(cfgGui.tabTextPen.GetColour())
+            dc.DrawPolygon([p1, p2, p3])
 
         if maxTab < (len(self.pages) - 1):
             dc.DestroyClippingRegion()
             dc.SetPen(cfgGui.tabTextPen)
 
-            util.drawLine(dc, rx, self.arrowY, 0, self.arrowHeight)
-            util.drawLine(
-                dc, rx + 1, self.arrowY, self.arrowWidth - 1, self.arrowHeight // 2 + 1
-            )
-            util.drawLine(
-                dc,
-                rx + 1,
-                self.arrowY + self.arrowHeight - 1,
-                self.arrowWidth - 1,
-                -(self.arrowHeight // 2 + 1),
-            )
+            p1 = (rx + self.arrowWidth, self.arrowY + self.arrowHeight // 2)
+            p2 = (rx + 1, self.arrowY)
+            p3 = (rx + 1, self.arrowY + self.arrowHeight)
+            dc.SetBrush(cfgGui.tabTextPen.GetColour())
+            dc.DrawPolygon([p1, p2, p3])
 
 
 # second part of MyTabCtrl

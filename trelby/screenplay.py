@@ -107,6 +107,9 @@ class Screenplay:
         # estimated amount of memory used by undo objects, in bytes
         self.undoMemoryUsed = 0
 
+        # inline style mask used for subsequently typed characters.
+        self.typingStyleMask = 0
+
     def isModified(self):
         if not self.hasChanged:
             return False
@@ -159,12 +162,13 @@ class Screenplay:
         sp.titles = copy.deepcopy(self.titles)
         sp.scDict = copy.deepcopy(self.scDict)
 
-        sp.lines = [Line(ln.lb, ln.lt, ln.text) for ln in self.lines]
+        sp.lines = [Line(ln.lb, ln.lt, ln.text, ln.styles) for ln in self.lines]
 
         # "open PDF on current page" breaks on scripts we're removing
         # notes from before printing if we don't copy these
         sp.line = self.line
         sp.column = self.column
+        sp.typingStyleMask = self.typingStyleMask
 
         return sp
 
@@ -331,7 +335,7 @@ class Screenplay:
 
                 lb = config.char2lb(s[0], False)
                 lt = config.char2lt(s[1], False)
-                text = util.toInputStr(util.fromUTF8(s[2:]))
+                rawText = util.fromUTF8(s[2:])
 
                 # convert unknown lb types into LB_SPACE
                 if lb == None:
@@ -348,7 +352,11 @@ class Screenplay:
                         _("Line {} has invalid element type.".format(i + 1))
                     )
 
-                line = Line(lb, lt, text)
+                line = Line.fromStr(config.lb2char(lb) + config.lt2char(lt) + rawText)
+                line.lb = lb
+                line.lt = lt
+                line.text = util.toInputStr(line.text)
+                line._normalizeStyles()
                 sp.lines.append(line)
 
                 if lb != LB_LAST:
@@ -549,11 +557,11 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
                 text = util.upper(line.text)
             else:
                 text = line.text
+            mask = line.getStyleMask()
 
+            prefix = " " * tcfg.indent
             if text and self.needsExtraParenIndent(i):
-                text = " " + text
-
-            text = " " * tcfg.indent + text
+                prefix += " "
 
             # do we need space before this line?
             lineSpaces = self.getSpacingBefore(i) // 10
@@ -566,7 +574,35 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
             # and now the line text
             para = etree.SubElement(content, "pre")
             para.set("class", htmlMap[line.lt])
-            para.text = str(text)
+            if text:
+                para.text = prefix
+                idx = 0
+                while idx < len(text):
+                    flags = mask[idx] if idx < len(mask) else 0
+                    end = idx + 1
+                    while (end < len(text)) and ((mask[end] if end < len(mask) else 0) == flags):
+                        end += 1
+                    seg = text[idx:end]
+                    if flags:
+                        span = etree.SubElement(para, "span")
+                        css = []
+                        if flags & pml.BOLD:
+                            css.append("font-weight: bold")
+                        if flags & pml.ITALIC:
+                            css.append("font-style: italic")
+                        if flags & pml.UNDERLINED:
+                            css.append("text-decoration: underline")
+                        span.set("style", "; ".join(css))
+                        span.text = seg
+                        span.tail = ""
+                    else:
+                        if len(para):
+                            para[-1].tail = (para[-1].tail or "") + seg
+                        else:
+                            para.text = (para.text or "") + seg
+                    idx = end
+            else:
+                para.text = prefix
 
         bodyText = etree.tostring(content, encoding="UTF-8", pretty_print=True).decode()
 
@@ -575,32 +611,49 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
     # Return screenplay as list of tuples of the form (elType, elText).
     # forced linebreaks are represented as \n characters.
     def getElementsAsList(self):
+        return [(lt, text) for (lt, text, _mask) in self.getElementsAsStyledList()]
+
+    # Return screenplay as list of tuples (elType, elText, styleMask).
+    # styleMask is an array of pml flags, one per character in elText.
+    # forced linebreaks are represented as \n characters with style=0.
+    def getElementsAsStyledList(self):
         ls = self.lines
         eleList = []
-        curLine = ""
+        curText = ""
+        curMask = []
+        curType = None
 
         for line in ls:
             lineType = line.lt
             lineText = line.text
+            lineMask = line.getStyleMask()
 
             if self.cfg.getType(line.lt).export.isCaps:
                 lineText = util.upper(lineText)
 
-            curLine += lineText
+            if curType is None:
+                curType = lineType
+
+            curText += lineText
+            curMask.extend(lineMask)
 
             if line.lb == LB_LAST:
-                eleList.append((lineType, curLine))
-                curLine = ""
+                eleList.append((curType, curText, curMask))
+                curText = ""
+                curMask = []
+                curType = None
             elif line.lb == LB_SPACE:
-                curLine += " "
+                curText += " "
+                curMask.append(0)
             elif line.lb == LB_FORCED:
-                curLine += "\n"
+                curText += "\n"
+                curMask.append(0)
 
         return eleList
 
     # Generate a Final Draft XML file and return as string.
     def generateFDX(self):
-        eleList = self.getElementsAsList()
+        eleList = self.getElementsAsStyledList()
         fd = etree.Element("FinalDraft")
         fd.set("DocumentType", "Script")
         fd.set("Template", "No")
@@ -620,7 +673,7 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
         }
 
         for ele in eleList:
-            typ, txt = ele
+            typ, txt, mask = ele
             if typ == NOTE:
                 dummyPara = etree.SubElement(content, "Paragraph")
                 dummyPara.set("Type", xmlMap[typ])
@@ -630,9 +683,29 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
             else:
                 para = etree.SubElement(content, "Paragraph")
                 para.set("Type", xmlMap[typ])
+            idx = 0
+            while idx < len(txt):
+                flags = mask[idx] if idx < len(mask) else 0
+                end = idx + 1
+                while (end < len(txt)) and ((mask[end] if end < len(mask) else 0) == flags):
+                    end += 1
 
-            paratxt = etree.SubElement(para, "Text")
-            paratxt.text = str(txt)
+                paratxt = etree.SubElement(para, "Text")
+                if flags:
+                    styles = []
+                    if flags & pml.BOLD:
+                        styles.append("Bold")
+                    if flags & pml.ITALIC:
+                        styles.append("Italic")
+                    if flags & pml.UNDERLINED:
+                        styles.append("Underline")
+                    if styles:
+                        paratxt.set("Style", "+".join(styles))
+                paratxt.text = str(txt[idx:end])
+                idx = end
+            if len(txt) == 0:
+                paratxt = etree.SubElement(para, "Text")
+                paratxt.text = ""
 
         # FD does not recognize "New Act" by default. It needs an
         # ElementSettings element added.
@@ -811,11 +884,10 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
         length = len(ls)
         i = 0
 
-        magicslash = "TRELBY-MAGIC-SLASH"
-
         while i < length:
             lt = ls[i].lt
             text = ""
+            mask = []
 
             while 1:
                 ln = ls[i]
@@ -823,11 +895,15 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
 
                 lb = ln.lb
                 text += ln.text
+                mask.extend(ln.getStyleMask())
 
                 if lb in (LB_SPACE, LB_NONE):
-                    text += config.lb2str(lb)
+                    sep = config.lb2str(lb)
+                    text += sep
+                    mask.extend([0] * len(sep))
                 elif lb == LB_FORCED:
-                    text += magicslash + "line "
+                    text += "\n"
+                    mask.append(0)
                 elif lb == LB_LAST:
                     break
                 else:
@@ -835,11 +911,28 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
                         _("Unknown line break style {} in generateRTF".format(lb))
                     )
 
-            s += (
-                (r"{\pard \s%d " % lt)
-                + util.escapeRTF(text).replace(magicslash, "\\")
-                + "}{\\par}\n"
-            )
+            s += r"{\pard \s%d " % lt
+            idx = 0
+            while idx < len(text):
+                flags = mask[idx] if idx < len(mask) else 0
+                end = idx + 1
+                while (end < len(text)) and ((mask[end] if end < len(mask) else 0) == flags):
+                    end += 1
+                seg = text[idx:end]
+                segEsc = util.escapeRTF(seg).replace("\n", r"\line ")
+                if flags:
+                    s += "{"
+                    if flags & pml.BOLD:
+                        s += r"\b "
+                    if flags & pml.ITALIC:
+                        s += r"\i "
+                    if flags & pml.UNDERLINED:
+                        s += r"\ul "
+                    s += segEsc + "}"
+                else:
+                    s += segEsc
+                idx = end
+            s += r"}{\par}" + "\n"
 
         s += "}"
 
@@ -981,6 +1074,7 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
                 y += self.getSpacingBefore(i)
 
             typ = pml.NORMAL
+            baseTyp = pml.NORMAL
 
             if doExtra:
                 if forPDF:
@@ -999,21 +1093,33 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
                     typ |= pml.ITALIC
                 if tt.isUnderlined:
                     typ |= pml.UNDERLINED
+                baseTyp = typ
             else:
                 text = line.text
 
             extraIndent = 1 if self.needsExtraParenIndent(i) else 0
 
-            to = pml.TextOp(
-                text,
-                cfg.marginLeft + (tcfg.indent + extraIndent) * chX,
-                cfg.marginTop + (y / 10.0) * chY,
-                fs,
-                typ,
-                line=i,
-            )
-
-            pg.add(to)
+            x = cfg.marginLeft + (tcfg.indent + extraIndent) * chX
+            yPos = cfg.marginTop + (y / 10.0) * chY
+            to = None
+            if doExtra and line.styles:
+                mask = line.getStyleMask()
+                col = 0
+                while col < len(text):
+                    flags = baseTyp | mask[col]
+                    segEnd = col + 1
+                    while (segEnd < len(text)) and ((baseTyp | mask[segEnd]) == flags):
+                        segEnd += 1
+                    seg = text[col:segEnd]
+                    to = pml.TextOp(seg, x + col * chX, yPos, fs, flags, line=i, col=col)
+                    pg.add(to)
+                    col = segEnd
+                if len(text) == 0:
+                    to = pml.TextOp("", x, yPos, fs, baseTyp, line=i, col=0)
+                    pg.add(to)
+            else:
+                to = pml.TextOp(text, x, yPos, fs, typ, line=i, col=0)
+                pg.add(to)
 
             if forPDF and (tcfg.lt == NOTE) and cfg.pdfOutlineNotes:
                 offset = chX / 2.0
@@ -1187,6 +1293,7 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
 
         # text remaining to be wrapped
         text = line.text
+        mask = line.getStyleMask()
 
         while 1:
             # reduce parenthetical width by 1 from second line onwards
@@ -1196,7 +1303,7 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
                 w = width
 
             if len(text) <= w:
-                ret.append(Line(line.lb, line.lt, text))
+                ret.append(Line(line.lb, line.lt, text, Line.maskToStyles(mask)))
                 break
             else:
                 i = text.rfind(" ", 0, w + 1)
@@ -1223,20 +1330,34 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
                         i += 1
 
                     if i == len(text):
-                        ret.append(Line(line.lb, line.lt, text))
+                        ret.append(Line(line.lb, line.lt, text, Line.maskToStyles(mask)))
 
                         break
                     else:
-                        ret.append(Line(LB_SPACE, line.lt, text[0 : i - 1]))
+                        ret.append(
+                            Line(
+                                LB_SPACE,
+                                line.lt,
+                                text[0 : i - 1],
+                                Line.maskToStyles(mask[0 : i - 1]),
+                            )
+                        )
                         text = text[i:]
+                        mask = mask[i:]
 
                 elif i >= 0:
-                    ret.append(Line(LB_SPACE, line.lt, text[0:i]))
+                    ret.append(
+                        Line(LB_SPACE, line.lt, text[0:i], Line.maskToStyles(mask[0:i]))
+                    )
                     text = text[i + 1 :]
+                    mask = mask[i + 1 :]
 
                 else:
-                    ret.append(Line(LB_NONE, line.lt, text[0:w]))
+                    ret.append(
+                        Line(LB_NONE, line.lt, text[0:w], Line.maskToStyles(mask[0:w]))
+                    )
                     text = text[w:]
+                    mask = mask[w:]
 
         return ret
 
@@ -1270,11 +1391,15 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
             cursorOffset = -1
 
         s = ls[line1].text
+        styleMask = ls[line1].getStyleMask()
         for i in range(line1 + 1, line2 + 1):
-            s += config.lb2str(ls[i - 1].lb)
+            sep = config.lb2str(ls[i - 1].lb)
+            s += sep
+            styleMask.extend([0] * len(sep))
             s += ls[i].text
+            styleMask.extend(ls[i].getStyleMask())
 
-        tmp = Line(ls[line2].lb, ls[line1].lt, s)
+        tmp = Line(ls[line2].lb, ls[line1].lt, s, Line.maskToStyles(styleMask))
         wrappedLines = self.wrapLine(tmp)
         ls[line1 : line2 + 1] = wrappedLines
 
@@ -1757,6 +1882,7 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
             # if changing away from PAREN containing only "()", remove it
             if (first == last) and (ls[first].lt == PAREN) and (ls[first].text == "()"):
                 ls[first].text = ""
+                ls[first].styles = []
 
                 if first == self.line:
                     self.column = 0
@@ -1771,6 +1897,7 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
                 and (len(ls[first].text) == 0)
             ):
                 ls[first].text = "()"
+                ls[first].styles = []
 
                 if first == self.line:
                     self.column = 1
@@ -1806,10 +1933,12 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
     def joinLines(self, line):
         ls = self.lines
         ln = ls[line]
+        nextLine = ls[line + 1]
 
         pos = len(ln.text)
-        ln.text += ls[line + 1].text
-        ln.lb = ls[line + 1].lb
+        ln.text += nextLine.text
+        ln.setStyleMask(ln.getStyleMask() + nextLine.getStyleMask())
+        ln.lb = nextLine.lb
 
         self.setLineTypes(line + 1, ln.lt)
         del ls[line + 1]
@@ -1822,10 +1951,12 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
         ln = self.lines[self.line]
 
         s = ln.text
+        mask = ln.getStyleMask()
         preStr = s[: self.column]
         postStr = s[self.column :]
-        newLine = Line(ln.lb, ln.lt, postStr)
+        newLine = Line(ln.lb, ln.lt, postStr, Line.maskToStyles(mask[self.column :]))
         ln.text = preStr
+        ln.setStyleMask(mask[: self.column])
         ln.lb = LB_FORCED
         self.lines.insert(self.line + 1, newLine)
 
@@ -1850,6 +1981,7 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
                 self.column += 1
         else:
             ls[self.line].text = self.acItems[self.acSel]
+            ls[self.line].styles = []
             self.column = len(ls[self.line].text)
 
         self.splitLine()
@@ -1869,6 +2001,7 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
     def deleteChar(self, line, column, posCursor=True):
         s = self.lines[line].text
         self.lines[line].text = s[:column] + s[column + 1 :]
+        self.lines[line].deleteRange(column, column + 1)
 
         if posCursor:
             self.column = column
@@ -2204,7 +2337,10 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
 
             ln = ls[i]
 
-            cd.lines.append(Line(ln.lb, ln.lt, ln.text[c1 : c2 + 1]))
+            clipMask = ln.getStyleMask()[c1 : c2 + 1]
+            cd.lines.append(
+                Line(ln.lb, ln.lt, ln.text[c1 : c2 + 1], Line.maskToStyles(clipMask))
+            )
 
         cd.lines[-1].lb = LB_LAST
 
@@ -2223,6 +2359,7 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
 
             ln = ls[i]
             ln.text = ln.text[0:c1] + ln.text[c2 + 1 :]
+            ln.deleteRange(c1, c2 + 1)
 
             if i == marked[0]:
                 endCol = c1
@@ -2299,6 +2436,114 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
 
         return cd
 
+    @staticmethod
+    def _toggleInlineMarkup(text, prefix, suffix):
+        if text.startswith(prefix) and text.endswith(suffix):
+            edgeLength = len(prefix) + len(suffix)
+            if len(text) >= edgeLength:
+                if suffix:
+                    return text[len(prefix) : -len(suffix)]
+                else:
+                    return text[len(prefix) :]
+
+        return prefix + text + suffix
+
+    @staticmethod
+    def _markupToStyleFlag(prefix, suffix):
+        if (prefix, suffix) == ("**", "**"):
+            return pml.BOLD
+        if (prefix, suffix) == ("*", "*"):
+            return pml.ITALIC
+        if (prefix, suffix) == ("_", "_"):
+            return pml.UNDERLINED
+        return 0
+
+    def applyInlineStyle(self, styleFlag):
+        if styleFlag == 0:
+            return False
+
+        marked = self.getMarkedLines()
+        u = undo.AnyDifference(self)
+
+        if not marked:
+            if self.typingStyleMask & styleFlag:
+                self.typingStyleMask &= ~styleFlag
+            else:
+                self.typingStyleMask |= styleFlag
+        else:
+            ls = self.lines
+            paraStarts = sorted(
+                {self.getParaFirstIndexFromLine(i) for i in range(marked[0], marked[1] + 1)}
+            )
+            for i in range(marked[0], marked[1] + 1):
+                c1, c2 = self.getMarkedColumns(i, marked)
+                ls[i].toggleStyle(c1, c2 + 1, styleFlag)
+
+            for paraStart in reversed(paraStarts):
+                if paraStart < len(self.lines):
+                    self.rewrapPara(paraStart)
+            self.clearMark()
+
+        self.validatePos()
+        self.clearAutoComp()
+        self.markChanged()
+
+        u.setAfter(self)
+        self.addUndo(u)
+        return True
+
+    def applyInlineMarkup(self, prefix, suffix):
+        styleFlag = self._markupToStyleFlag(prefix, suffix)
+        if styleFlag:
+            return self.applyInlineStyle(styleFlag)
+
+        if (prefix == "") and (suffix == ""):
+            return False
+
+        marked = self.getMarkedLines()
+        u = undo.AnyDifference(self)
+
+        if not marked:
+            ln = self.lines[self.line]
+            ln.text = ln.text[: self.column] + prefix + suffix + ln.text[self.column :]
+            ln.insertMask(self.column, [0] * (len(prefix) + len(suffix)))
+            self.column += len(prefix)
+            self.rewrapPara()
+        else:
+            ls = self.lines
+            paraStarts = sorted(
+                {self.getParaFirstIndexFromLine(i) for i in range(marked[0], marked[1] + 1)}
+            )
+
+            endColumn = self.column
+
+            for i in range(marked[0], marked[1] + 1):
+                c1, c2 = self.getMarkedColumns(i, marked)
+                segment = ls[i].text[c1 : c2 + 1]
+                replacement = self._toggleInlineMarkup(segment, prefix, suffix)
+                ls[i].text = ls[i].text[:c1] + replacement + ls[i].text[c2 + 1 :]
+                ls[i].deleteRange(c1, c2 + 1)
+                ls[i].insertMask(c1, [0] * len(replacement))
+
+                if i == marked[1]:
+                    endColumn = c1 + len(replacement)
+
+            self.line = marked[1]
+            self.column = endColumn
+            for paraStart in reversed(paraStarts):
+                if paraStart < len(self.lines):
+                    self.rewrapPara(paraStart)
+            self.clearMark()
+
+        self.validatePos()
+        self.clearAutoComp()
+        self.markChanged()
+
+        u.setAfter(self)
+        self.addUndo(u)
+
+        return True
+
     # paste data into script. clines is a list of Line objects.
     def paste(self, clines):
         if len(clines) == 0:
@@ -2317,19 +2562,24 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
             ln = clines[i]
 
             newLine = Line(LB_LAST, ln.lt)
+            newMask = []
 
             while 1:
                 ln = clines[i]
                 i += 1
 
                 newLine.text += ln.text
+                newMask.extend(ln.getStyleMask())
 
                 if ln.lb in (LB_LAST, LB_FORCED):
                     break
 
-                newLine.text += config.lb2str(ln.lb)
+                sep = config.lb2str(ln.lb)
+                newLine.text += sep
+                newMask.extend([0] * len(sep))
 
             newLine.lb = ln.lb
+            newLine.setStyleMask(newMask)
             inLines.append(newLine)
 
         # shouldn't happen, but...
@@ -2348,7 +2598,10 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
         if (len(ln.text) == 0) and self.isOnlyLineOfElem(self.line):
             ln.lt = inLines[0].lt
 
+        leftMask = ln.getStyleMask()[: self.column]
+        rightMask = ln.getStyleMask()[self.column :]
         ln.text = ln.text[: self.column] + inLines[0].text + ln.text[self.column :]
+        ln.setStyleMask(leftMask + inLines[0].getStyleMask() + rightMask)
         self.column += len(inLines[0].text)
 
         if len(inLines) != 1:
@@ -3224,6 +3477,8 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
 
         s = s[: self.column] + char + s[self.column :]
         ls[self.line].text = s
+        if self.typingStyleMask:
+            ls[self.line].insertMask(self.column, [self.typingStyleMask])
         self.column += 1
 
         tmp = s.upper()
@@ -3237,6 +3492,7 @@ Generated with <a href="http://www.trelby.org">Trelby</a>.</p>
         ):
             ls[self.line].lt = PAREN
             ls[self.line].text = "()"
+            ls[self.line].styles = []
 
         self.rewrapPara()
         self.markChanged()

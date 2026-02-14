@@ -82,3 +82,9 @@ def testEscapeStrings():
     for items, s in data:
         assert util.escapeStrings(items) == s
         assert util.unescapeStrings(s) == items
+
+
+def testMyKeyEventUnicodeKey():
+    event = util.MyKeyEvent(ord("A"))
+
+    assert event.GetUnicodeKey() == ord("A")

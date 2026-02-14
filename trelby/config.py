@@ -60,6 +60,21 @@ PBI_REAL_AND_UNADJ = 2
 # for range checking above value
 PBI_FIRST, PBI_LAST = PBI_NONE, PBI_REAL_AND_UNADJ
 
+THEME_LIGHT = 0
+THEME_DARK = 1
+THEME_SYSTEM = 2
+THEME_SEPIA = 3
+THEME_GRAPHITE = 4
+THEME_MIDNIGHT = 5
+THEME_SOLAR_LIGHT = 6
+THEME_SOLAR_DARK = 7
+THEME_FOREST = 8
+THEME_ROSE = 9
+THEME_HIGH_CONTRAST = 10
+THEME_PAPER = 11
+THEME_FIRST, THEME_LAST = THEME_LIGHT, THEME_PAPER
+DISPLAY_SCALE_OPTIONS = (75, 100, 110, 125, 135, 150, 160, 175, 200)
+
 # constants for identifying PDFFontInfos
 PDF_FONT_NORMAL = "Normal"
 PDF_FONT_BOLD = "Bold"
@@ -391,6 +406,7 @@ class Config:
         t.screen.isCaps = True
         t.screen.isBold = True
         t.export.isCaps = True
+        t.export.isBold = True
         self.types[t.lt] = t
 
         t = Type(screenplay.ACTION)
@@ -463,6 +479,7 @@ class Config:
         ):
             self.pdfFonts[name] = PDFFontInfo(name, style)
 
+        self.setDefaultPDFFonts()
         self.recalc()
 
     def setupVars(self):
@@ -532,6 +549,31 @@ class Config:
         v.addStrLatin1("strDialogueContinued", " (cont'd)", "String/DialogueContinued")
 
         v.makeDicts()
+
+    # set default embedded PDF fonts to Courier Prime when bundled files exist.
+    def setDefaultPDFFonts(self):
+        families = (
+            (PDF_FONT_NORMAL, "CourierPrime", "fonts/Courier Prime.ttf"),
+            (PDF_FONT_BOLD, "CourierPrime-Bold", "fonts/Courier Prime Bold.ttf"),
+            (PDF_FONT_ITALIC, "CourierPrime-Italic", "fonts/Courier Prime Italic.ttf"),
+            (
+                PDF_FONT_BOLD_ITALIC,
+                "CourierPrime-BoldItalic",
+                "fonts/Courier Prime Bold Italic.ttf",
+            ),
+        )
+
+        resolved = []
+        for name, pdf_name, relative_path in families:
+            absolute_path = misc.getFullPath(relative_path)
+            if not util.fileExists(absolute_path):
+                return
+            resolved.append((name, pdf_name, absolute_path))
+
+        for name, pdf_name, absolute_path in resolved:
+            font = self.pdfFonts[name]
+            font.pdfName = pdf_name
+            font.filename = absolute_path
 
     # load config from string 's'. does not throw any exceptions, silently
     # ignores any errors, and always leaves config in an ok state.
@@ -815,6 +857,24 @@ class ConfigGlobal:
                         util.Key(10, ctrl=True).toInt(),
                     ],
                     isFixed=True,
+                ),
+                Command(
+                    "FormatBold",
+                    _("Toggle bold formatting for selected text."),
+                    [util.Key(2, ctrl=True).toInt()],
+                    isMenu=True,
+                ),
+                Command(
+                    "FormatItalic",
+                    _("Toggle italic formatting for selected text."),
+                    [util.Key(ord("I"), alt=True).toInt()],
+                    isMenu=True,
+                ),
+                Command(
+                    "FormatUnderline",
+                    _("Toggle underline formatting for selected text."),
+                    [util.Key(21, ctrl=True).toInt()],
+                    isMenu=True,
                 ),
                 Command(
                     "Fullscreen",
@@ -1159,6 +1219,8 @@ class ConfigGlobal:
         # whether to use per-elem-type colors (textSceneColor etc.)
         # instead of using textColor for all elem types
         v.addBool("useCustomElemColors", False, "UseCustomElemColors")
+        v.addInt("pageThemeMode", THEME_SYSTEM, "PageThemeMode", THEME_FIRST, THEME_LAST)
+        v.addInt("displayScale", 200, "DisplayScale", 1, 400)
 
         # page break indicators to show
         v.addInt("pbi", PBI_REAL, "PageBreakIndicators", PBI_FIRST, PBI_LAST)
@@ -1183,23 +1245,23 @@ class ConfigGlobal:
             "textHdr", 128, 128, 128, "TextHeadersFG", _("Text foreground (headers)")
         )
         v.addColor("textBg", 255, 255, 255, "TextBG", _("Text background"))
-        v.addColor("workspace", 237, 237, 237, "Workspace", _("Workspace"))
-        v.addColor("pageBorder", 202, 202, 202, "PageBorder", _("Page border"))
-        v.addColor("pageShadow", 153, 153, 153, "PageShadow", _("Page shadow"))
-        v.addColor("selected", 200, 200, 200, "Selected", _("Selection"))
-        v.addColor("cursor", 135, 135, 253, "Cursor", _("Cursor"))
+        v.addColor("workspace", 246, 247, 249, "Workspace", _("Workspace"))
+        v.addColor("pageBorder", 214, 216, 220, "PageBorder", _("Page border"))
+        v.addColor("pageShadow", 193, 196, 201, "PageShadow", _("Page shadow"))
+        v.addColor("selected", 215, 231, 255, "Selected", _("Selection"))
+        v.addColor("cursor", 10, 132, 255, "Cursor", _("Cursor"))
         v.addColor(
             "autoCompFg", 0, 0, 0, "AutoCompletionFG", _("Auto-completion foreground")
         )
         v.addColor(
             "autoCompBg",
+            242,
+            247,
             255,
-            240,
-            168,
             "AutoCompletionBG",
             _("Auto-completion background"),
         )
-        v.addColor("note", 255, 237, 223, "ScriptNote", _("Script note"))
+        v.addColor("note", 255, 247, 224, "ScriptNote", _("Script note"))
         v.addColor("pagebreak", 221, 221, 221, "PageBreakLine", _("Page-break line"))
         v.addColor(
             "pagebreakNoAdjust",
@@ -1260,6 +1322,38 @@ class ConfigGlobal:
     def recalc(self):
         for it in self.cvars.numeric.values():
             util.clampObj(self, it.name, it.minVal, it.maxVal)
+
+        # Backward compatibility: older builds stored displayScale as 1..4
+        # multipliers. Normalize to the nearest allowed percentage value.
+        try:
+            self.displayScale = int(self.displayScale)
+        except (TypeError, ValueError):
+            self.displayScale = 200
+
+        if self.displayScale <= 4:
+            self.displayScale = self.displayScale * 100
+        self.displayScale = min(
+            DISPLAY_SCALE_OPTIONS, key=lambda v: abs(v - self.displayScale)
+        )
+
+        # Backward compatibility: CTRL+I conflicts with CTRL+Tab in our
+        # keycode model. Migrate old italic binding to ALT+I.
+        italic_cmd = None
+        for cmd in self.commands:
+            if cmd.name == "FormatItalic":
+                italic_cmd = cmd
+                break
+
+        if italic_cmd:
+            legacy_key = util.Key(9, ctrl=True).toInt()
+            new_key = util.Key(ord("I"), alt=True).toInt()
+
+            if legacy_key in italic_cmd.keys:
+                italic_cmd.keys = [k for k in italic_cmd.keys if k != legacy_key]
+                if new_key not in italic_cmd.keys:
+                    italic_cmd.keys.insert(0, new_key)
+                if len(italic_cmd.keys) == 0:
+                    italic_cmd.keys.append(new_key)
 
     def getType(self, lt):
         return self.types[lt]
@@ -1345,7 +1439,12 @@ class ConfigGlobal:
     def setDefaultFonts(self):
         fn = ["", "", "", ""]
 
-        if misc.isUnix:
+        if misc.isMac:
+            fn[0] = "Menlo 13"
+            fn[1] = "Menlo Bold 13"
+            fn[2] = "Menlo Italic 13"
+            fn[3] = "Menlo Bold Italic 13"
+        elif misc.isUnix:
             fn[0] = "Monospace 12"
             fn[1] = "Monospace Bold 12"
             fn[2] = "Monospace Italic 12"
@@ -1398,6 +1497,9 @@ class ConfigGui:
             tmp = wx.Colour(c.r, c.g, c.b)
             setattr(self, it.name, tmp)
 
+        self.applyDocumentTheme(cfgGl.pageThemeMode)
+        self.applyMacChromeTheme(cfgGl.pageThemeMode)
+
         # key = line type, value = wx.Colour
         self._lt2textColor = {}
 
@@ -1446,7 +1548,10 @@ class ConfigGui:
         # bits of pml.TextOp.flags.
         self.fonts = []
 
-        for fname in ["fontNormal", "fontBold", "fontItalic", "fontBoldItalic"]:
+        baseFont = None
+        for idx, fname in enumerate(
+            ["fontNormal", "fontBold", "fontItalic", "fontBoldItalic"]
+        ):
             fi = FontInfo()
 
             s = getattr(cfgGl, fname)
@@ -1461,6 +1566,11 @@ class ConfigGui:
 
                 try:
                     fi.font = wx.Font(nfi)
+                    fi.font.SetEncoding(wx.FONTENCODING_UTF8)
+                    scale = float(cfgGl.displayScale) / 100.0
+                    fi.font.SetPointSize(
+                        max(1, int(fi.font.GetPointSize() * scale))
+                    )
 
                     # likewise, evil users can set the font name to "z" or
                     # something equally silly, resulting in an
@@ -1478,14 +1588,47 @@ class ConfigGui:
             # font and use it. this sucks but is preferable to crashing or
             # displaying an empty screen.
             if not fi.font:
-                fi.font = wx.Font(
-                    10,
-                    wx.MODERN,
-                    wx.NORMAL,
-                    wx.NORMAL,
-                    encoding=wx.FONTENCODING_ISO8859_1,
-                )
+                if idx == 0:
+                    fallback = wx.Font(
+                        10,
+                        wx.MODERN,
+                        wx.NORMAL,
+                        wx.NORMAL,
+                        encoding=wx.FONTENCODING_ISO8859_1,
+                    )
+                else:
+                    source = baseFont or wx.Font(
+                        10,
+                        wx.MODERN,
+                        wx.NORMAL,
+                        wx.NORMAL,
+                        encoding=wx.FONTENCODING_ISO8859_1,
+                    )
+                    fallback = wx.Font(source)
+
+                    if idx == 1:
+                        fallback.SetWeight(wx.FONTWEIGHT_BOLD)
+                    elif idx == 2:
+                        fallback.SetStyle(wx.FONTSTYLE_ITALIC)
+                    elif idx == 3:
+                        fallback.SetWeight(wx.FONTWEIGHT_BOLD)
+                        fallback.SetStyle(wx.FONTSTYLE_ITALIC)
+
+                fi.font = fallback
                 setattr(cfgGl, fname, fi.font.GetNativeFontInfo().ToString())
+
+            # Ensure bold/italic variants actually have the flags set,
+            # regardless of whether they were loaded from config or fallback.
+            if idx == 1:
+                fi.font.SetWeight(wx.FONTWEIGHT_BOLD)
+            elif idx == 2:
+                fi.font.SetStyle(wx.FONTSTYLE_ITALIC)
+            elif idx == 3:
+                fi.font.SetWeight(wx.FONTWEIGHT_BOLD)
+                fi.font.SetStyle(wx.FONTSTYLE_ITALIC)
+
+            if idx == 0:
+                baseFont = wx.Font(fi.font)
 
             fx, fy = util.getTextExtent(fi.font, "O")
 
@@ -1493,6 +1636,268 @@ class ConfigGui:
             fi.fy = max(1, fy)
 
             self.fonts.append(fi)
+
+    def isSystemDarkMode(self):
+        if not hasattr(wx.SystemSettings, "GetAppearance"):
+            return False
+        appearance = wx.SystemSettings.GetAppearance()
+        if not appearance or not hasattr(appearance, "IsDark"):
+            return False
+        return appearance.IsDark()
+
+    def applyMacChromeTheme(self, themeMode):
+        if not misc.isMac:
+            return
+
+        # Only apply overrides for standard themes (Light, Dark, System)
+        # Custom themes (Sepia, Solarized, etc.) define their own colors that shouldn't be overridden.
+        if themeMode not in (THEME_LIGHT, THEME_DARK, THEME_SYSTEM):
+            return
+
+        useDark = themeMode == THEME_DARK
+        if themeMode == THEME_SYSTEM:
+            useDark = self.isSystemDarkMode()
+
+        if useDark:
+            # Modern macOS Dark Mode colors (Big Sur+)
+            self.workspaceColor = wx.Colour(30, 30, 30)  # Darker background
+            self.tabTextColor = wx.Colour(220, 220, 220)
+            self.tabBarBgColor = wx.Colour(40, 40, 40)   # Lighter foreground (toolbar)
+            self.tabNonActiveBgColor = wx.Colour(50, 50, 50)
+            self.tabBorderColor = wx.Colour(60, 60, 60)
+            self.pageShadowColor = wx.Colour(10, 10, 10)
+            self.pageBorderColor = wx.Colour(60, 60, 60)
+        else:
+            # Modern macOS Light Mode colors (Big Sur+)
+            self.workspaceColor = wx.Colour(255, 255, 255) # Pure white background for content
+            self.tabTextColor = wx.Colour(60, 60, 60)
+            self.tabBarBgColor = wx.Colour(236, 236, 236)  # Standard light gray toolbar
+            self.tabNonActiveBgColor = wx.Colour(225, 225, 225) # Slightly darker than toolbar
+            self.tabBorderColor = wx.Colour(210, 210, 210)
+            self.pageShadowColor = wx.Colour(210, 210, 210) # Subtle shadow
+            self.pageBorderColor = wx.Colour(220, 220, 220)
+
+    def applyDocumentTheme(self, themeMode):
+        if themeMode == THEME_SEPIA:
+            self.textColor = wx.Colour(57, 45, 33)
+            self.textHdrColor = wx.Colour(124, 107, 88)
+            self.textBgColor = wx.Colour(250, 242, 226)
+            self.workspaceColor = wx.Colour(236, 227, 210)
+            self.pageBorderColor = wx.Colour(204, 185, 158)
+            self.pageShadowColor = wx.Colour(183, 164, 137)
+            self.selectedColor = wx.Colour(229, 210, 177)
+            self.cursorColor = wx.Colour(167, 114, 44)
+            self.noteColor = wx.Colour(255, 237, 196)
+            self.pagebreakColor = wx.Colour(203, 184, 156)
+            self.pagebreakNoAdjustColor = wx.Colour(180, 162, 136)
+            self.autoCompFgColor = wx.Colour(57, 45, 33)
+            self.autoCompBgColor = wx.Colour(245, 232, 207)
+            self.tabTextColor = wx.Colour(62, 50, 38)
+            self.tabBarBgColor = wx.Colour(224, 207, 183)
+            self.tabNonActiveBgColor = wx.Colour(209, 190, 163)
+            self.tabBorderColor = wx.Colour(183, 164, 137)
+            return
+
+        if themeMode == THEME_GRAPHITE:
+            self.textColor = wx.Colour(28, 30, 33)
+            self.textHdrColor = wx.Colour(107, 114, 124)
+            self.textBgColor = wx.Colour(248, 249, 251)
+            self.workspaceColor = wx.Colour(232, 235, 239)
+            self.pageBorderColor = wx.Colour(193, 199, 208)
+            self.pageShadowColor = wx.Colour(168, 174, 183)
+            self.selectedColor = wx.Colour(208, 216, 228)
+            self.cursorColor = wx.Colour(97, 108, 125)
+            self.noteColor = wx.Colour(241, 243, 247)
+            self.pagebreakColor = wx.Colour(191, 198, 207)
+            self.pagebreakNoAdjustColor = wx.Colour(163, 170, 181)
+            self.autoCompFgColor = wx.Colour(33, 36, 40)
+            self.autoCompBgColor = wx.Colour(234, 238, 244)
+            self.tabTextColor = wx.Colour(45, 49, 55)
+            self.tabBarBgColor = wx.Colour(214, 220, 228)
+            self.tabNonActiveBgColor = wx.Colour(194, 201, 211)
+            self.tabBorderColor = wx.Colour(161, 168, 179)
+            return
+
+        if themeMode == THEME_MIDNIGHT:
+            self.textColor = wx.Colour(223, 235, 255)
+            self.textHdrColor = wx.Colour(140, 156, 184)
+            self.textBgColor = wx.Colour(20, 27, 40)
+            self.workspaceColor = wx.Colour(13, 18, 30)
+            self.pageBorderColor = wx.Colour(47, 63, 89)
+            self.pageShadowColor = wx.Colour(7, 10, 18)
+            self.selectedColor = wx.Colour(44, 76, 127)
+            self.cursorColor = wx.Colour(86, 169, 255)
+            self.noteColor = wx.Colour(40, 50, 74)
+            self.pagebreakColor = wx.Colour(70, 88, 116)
+            self.pagebreakNoAdjustColor = wx.Colour(88, 108, 139)
+            self.autoCompFgColor = wx.Colour(227, 236, 250)
+            self.autoCompBgColor = wx.Colour(35, 47, 67)
+            self.tabTextColor = wx.Colour(231, 240, 255)
+            self.tabBarBgColor = wx.Colour(20, 27, 40)
+            self.tabNonActiveBgColor = wx.Colour(33, 43, 63)
+            self.tabBorderColor = wx.Colour(61, 77, 105)
+            return
+
+        if themeMode == THEME_SOLAR_LIGHT:
+            self.textColor = wx.Colour(88, 110, 117)
+            self.textHdrColor = wx.Colour(131, 148, 150)
+            self.textBgColor = wx.Colour(253, 246, 227)
+            self.workspaceColor = wx.Colour(245, 238, 214)
+            self.pageBorderColor = wx.Colour(220, 210, 173)
+            self.pageShadowColor = wx.Colour(198, 189, 154)
+            self.selectedColor = wx.Colour(238, 232, 213)
+            self.cursorColor = wx.Colour(38, 139, 210)
+            self.noteColor = wx.Colour(254, 240, 198)
+            self.pagebreakColor = wx.Colour(210, 200, 166)
+            self.pagebreakNoAdjustColor = wx.Colour(186, 177, 147)
+            self.autoCompFgColor = wx.Colour(88, 110, 117)
+            self.autoCompBgColor = wx.Colour(243, 234, 202)
+            self.tabTextColor = wx.Colour(87, 106, 112)
+            self.tabBarBgColor = wx.Colour(231, 222, 191)
+            self.tabNonActiveBgColor = wx.Colour(218, 208, 177)
+            self.tabBorderColor = wx.Colour(189, 180, 150)
+            return
+
+        if themeMode == THEME_SOLAR_DARK:
+            self.textColor = wx.Colour(131, 148, 150)
+            self.textHdrColor = wx.Colour(101, 123, 131)
+            self.textBgColor = wx.Colour(0, 43, 54)
+            self.workspaceColor = wx.Colour(0, 34, 43)
+            self.pageBorderColor = wx.Colour(7, 54, 66)
+            self.pageShadowColor = wx.Colour(0, 24, 30)
+            self.selectedColor = wx.Colour(7, 54, 66)
+            self.cursorColor = wx.Colour(38, 139, 210)
+            self.noteColor = wx.Colour(16, 59, 70)
+            self.pagebreakColor = wx.Colour(31, 74, 85)
+            self.pagebreakNoAdjustColor = wx.Colour(44, 85, 96)
+            self.autoCompFgColor = wx.Colour(147, 161, 161)
+            self.autoCompBgColor = wx.Colour(10, 52, 63)
+            self.tabTextColor = wx.Colour(167, 180, 180)
+            self.tabBarBgColor = wx.Colour(0, 43, 54)
+            self.tabNonActiveBgColor = wx.Colour(7, 54, 66)
+            self.tabBorderColor = wx.Colour(31, 74, 85)
+            return
+
+        if themeMode == THEME_FOREST:
+            self.textColor = wx.Colour(34, 54, 41)
+            self.textHdrColor = wx.Colour(89, 114, 98)
+            self.textBgColor = wx.Colour(241, 248, 242)
+            self.workspaceColor = wx.Colour(222, 235, 224)
+            self.pageBorderColor = wx.Colour(176, 198, 181)
+            self.pageShadowColor = wx.Colour(151, 174, 157)
+            self.selectedColor = wx.Colour(197, 224, 201)
+            self.cursorColor = wx.Colour(46, 125, 70)
+            self.noteColor = wx.Colour(230, 242, 220)
+            self.pagebreakColor = wx.Colour(171, 194, 176)
+            self.pagebreakNoAdjustColor = wx.Colour(148, 172, 153)
+            self.autoCompFgColor = wx.Colour(36, 56, 43)
+            self.autoCompBgColor = wx.Colour(213, 231, 216)
+            self.tabTextColor = wx.Colour(35, 57, 43)
+            self.tabBarBgColor = wx.Colour(199, 220, 203)
+            self.tabNonActiveBgColor = wx.Colour(183, 206, 188)
+            self.tabBorderColor = wx.Colour(148, 172, 153)
+            return
+
+        if themeMode == THEME_ROSE:
+            self.textColor = wx.Colour(64, 40, 49)
+            self.textHdrColor = wx.Colour(124, 95, 106)
+            self.textBgColor = wx.Colour(255, 247, 250)
+            self.workspaceColor = wx.Colour(243, 227, 234)
+            self.pageBorderColor = wx.Colour(214, 184, 196)
+            self.pageShadowColor = wx.Colour(193, 162, 175)
+            self.selectedColor = wx.Colour(241, 211, 224)
+            self.cursorColor = wx.Colour(191, 67, 118)
+            self.noteColor = wx.Colour(255, 236, 242)
+            self.pagebreakColor = wx.Colour(205, 175, 188)
+            self.pagebreakNoAdjustColor = wx.Colour(181, 152, 165)
+            self.autoCompFgColor = wx.Colour(70, 46, 55)
+            self.autoCompBgColor = wx.Colour(248, 225, 235)
+            self.tabTextColor = wx.Colour(70, 46, 55)
+            self.tabBarBgColor = wx.Colour(232, 204, 216)
+            self.tabNonActiveBgColor = wx.Colour(220, 191, 204)
+            self.tabBorderColor = wx.Colour(182, 153, 166)
+            return
+
+        if themeMode == THEME_HIGH_CONTRAST:
+            self.textColor = wx.Colour(255, 255, 255)
+            self.textHdrColor = wx.Colour(255, 255, 0)
+            self.textBgColor = wx.Colour(0, 0, 0)
+            self.workspaceColor = wx.Colour(0, 0, 0)
+            self.pageBorderColor = wx.Colour(255, 255, 255)
+            self.pageShadowColor = wx.Colour(80, 80, 80)
+            self.selectedColor = wx.Colour(0, 0, 255)
+            self.cursorColor = wx.Colour(0, 255, 255)
+            self.noteColor = wx.Colour(30, 30, 30)
+            self.pagebreakColor = wx.Colour(255, 255, 255)
+            self.pagebreakNoAdjustColor = wx.Colour(180, 180, 180)
+            self.autoCompFgColor = wx.Colour(255, 255, 255)
+            self.autoCompBgColor = wx.Colour(35, 35, 35)
+            self.tabTextColor = wx.Colour(255, 255, 255)
+            self.tabBarBgColor = wx.Colour(0, 0, 0)
+            self.tabNonActiveBgColor = wx.Colour(28, 28, 28)
+            self.tabBorderColor = wx.Colour(255, 255, 255)
+            return
+
+        if themeMode == THEME_PAPER:
+            self.textColor = wx.Colour(43, 38, 31)
+            self.textHdrColor = wx.Colour(97, 89, 78)
+            self.textBgColor = wx.Colour(252, 250, 244)
+            self.workspaceColor = wx.Colour(237, 232, 221)
+            self.pageBorderColor = wx.Colour(205, 196, 179)
+            self.pageShadowColor = wx.Colour(181, 171, 154)
+            self.selectedColor = wx.Colour(230, 219, 194)
+            self.cursorColor = wx.Colour(119, 94, 61)
+            self.noteColor = wx.Colour(251, 241, 218)
+            self.pagebreakColor = wx.Colour(199, 190, 173)
+            self.pagebreakNoAdjustColor = wx.Colour(174, 165, 149)
+            self.autoCompFgColor = wx.Colour(52, 46, 38)
+            self.autoCompBgColor = wx.Colour(241, 232, 209)
+            self.tabTextColor = wx.Colour(52, 46, 38)
+            self.tabBarBgColor = wx.Colour(224, 215, 197)
+            self.tabNonActiveBgColor = wx.Colour(212, 202, 184)
+            self.tabBorderColor = wx.Colour(174, 165, 149)
+            return
+
+        useDark = themeMode == THEME_DARK
+        if themeMode == THEME_SYSTEM:
+            useDark = self.isSystemDarkMode()
+
+        if useDark:
+            self.textColor = wx.Colour(227, 230, 235)
+            self.textHdrColor = wx.Colour(153, 160, 169)
+            self.textBgColor = wx.Colour(36, 38, 42)
+            self.workspaceColor = wx.Colour(24, 25, 28)
+            self.pageBorderColor = wx.Colour(72, 76, 83)
+            self.pageShadowColor = wx.Colour(15, 16, 18)
+            self.selectedColor = wx.Colour(52, 86, 132)
+            self.cursorColor = wx.Colour(118, 176, 255)
+            self.noteColor = wx.Colour(73, 63, 36)
+            self.pagebreakColor = wx.Colour(88, 95, 106)
+            self.pagebreakNoAdjustColor = wx.Colour(103, 110, 120)
+            self.autoCompFgColor = wx.Colour(230, 233, 238)
+            self.autoCompBgColor = wx.Colour(51, 55, 62)
+            self.tabTextColor = wx.Colour(245, 247, 250)
+            self.tabBarBgColor = wx.Colour(36, 38, 42)
+            self.tabNonActiveBgColor = wx.Colour(50, 54, 60)
+            self.tabBorderColor = wx.Colour(72, 76, 83)
+        else:
+            self.textColor = wx.Colour(20, 21, 24)
+            self.textHdrColor = wx.Colour(113, 118, 126)
+            self.textBgColor = wx.Colour(255, 255, 255)
+            self.workspaceColor = wx.Colour(240, 242, 245)
+            self.pageBorderColor = wx.Colour(214, 216, 220)
+            self.pageShadowColor = wx.Colour(192, 196, 202)
+            self.selectedColor = wx.Colour(214, 231, 255)
+            self.cursorColor = wx.Colour(10, 132, 255)
+            self.noteColor = wx.Colour(255, 249, 229)
+            self.pagebreakColor = wx.Colour(208, 214, 222)
+            self.pagebreakNoAdjustColor = wx.Colour(185, 193, 204)
+            self.autoCompFgColor = wx.Colour(20, 21, 24)
+            self.autoCompBgColor = wx.Colour(245, 249, 255)
+            self.tabTextColor = wx.Colour(50, 50, 50)
+            self.tabBarBgColor = wx.Colour(221, 217, 215)
+            self.tabNonActiveBgColor = wx.Colour(180, 180, 180)
+            self.tabBorderColor = wx.Colour(202, 202, 202)
 
     # TextType -> FontInfo
     def tt2fi(self, tt):
@@ -1526,6 +1931,17 @@ def lb2char(lb):
 
 def lb2str(lb):
     return _conv(_lb2str, lb)
+
+
+def lb2displayChar(lb):
+    if lb == screenplay.LB_LAST:
+        return "\u00b6"
+    elif lb == screenplay.LB_FORCED:
+        return "\u21b5"
+    elif lb == screenplay.LB_SPACE:
+        return "\u00ac"
+    # For LB_NONE/LB_SPACE2, stick to default or empty
+    return _conv(_lb2char, lb)
 
 
 def char2lt(char, raiseException=True):

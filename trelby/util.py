@@ -528,7 +528,7 @@ def createPixelFont(height, family, style, weight):
     # FIXME: what's this "keep trying even once we go over the max height"
     # stuff? get rid of it.
     while 1:
-        fn = wx.Font(fs, family, style, weight, encoding=wx.FONTENCODING_ISO8859_1)
+        fn = wx.Font(fs, family, style, weight, encoding=wx.FONTENCODING_UTF8)
         h = getFontHeight(fn)
         diff = height - h
 
@@ -544,7 +544,7 @@ def createPixelFont(height, family, style, weight):
 
         fs += 2
 
-    return wx.Font(selected, family, style, weight, encoding=wx.FONTENCODING_ISO8859_1)
+    return wx.Font(selected, family, style, weight, encoding=wx.FONTENCODING_UTF8)
 
 
 def reverseComboSelect(combo, clientData):
@@ -785,7 +785,16 @@ class MyKeyEvent:
     def GetKeyCode(self):
         return self.kc
 
+    # wx.KeyEvent-compatible API used by MyCtrl.OnKeyChar.
+    def GetUnicodeKey(self):
+        return self.kc
+
     def ControlDown(self):
+        return self.controlDown
+
+    # wx.KeyEvent-compatible API on macOS where Command is the primary
+    # shortcut modifier. For tests, treat this like ControlDown.
+    def CmdDown(self):
         return self.controlDown
 
     def AltDown(self):
@@ -915,7 +924,7 @@ class Key:
     # construct from wx.KeyEvent
     @staticmethod
     def fromKE(ev):
-        return Key(ev.GetKeyCode(), ev.ControlDown(), ev.AltDown(), ev.ShiftDown())
+        return Key(ev.GetKeyCode(), eventControlDown(ev), ev.AltDown(), ev.ShiftDown())
 
     def toStr(self):
         s = ""
@@ -973,6 +982,18 @@ class String:
         self.pos += len(s2)
 
         return self
+
+
+def eventControlDown(ev):
+    # On macOS, Cmd is the standard shortcut modifier. CmdDown maps to
+    # ControlDown on other platforms, so this remains cross-platform.
+    if hasattr(ev, "CmdDown"):
+        try:
+            return bool(ev.CmdDown())
+        except TypeError:
+            pass
+
+    return bool(ev.ControlDown())
 
 
 # load at most maxSize (all if -1) bytes from 'filename', returning the

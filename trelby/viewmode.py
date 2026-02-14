@@ -8,11 +8,14 @@ import trelby.util as util
 # Number of lines the smooth scroll will try to search. 15-20 is a good
 # number to use with the layout mode margins we have.
 MAX_JUMP_DISTANCE = 17
+# Keep page geometry 1:1 with text metrics; extra zoom here doubles
+# dialogue/action indents relative to the rendered font width.
+MACOS_PAGE_ZOOM = 1.0
 
 
 # a piece of text on screen.
 class TextString:
-    def __init__(self, line, text, x, y, fi, isUnderlined):
+    def __init__(self, line, text, x, y, fi, isUnderlined, col=0):
 
         # if this object is a screenplay line, this is the index of the
         # corresponding line in the Screenplay.lines list. otherwise this
@@ -27,6 +30,7 @@ class TextString:
         self.text = text
         self.fi = fi
         self.isUnderlined = isUnderlined
+        self.col = col
 
 
 # a page shown on screen.
@@ -94,7 +98,13 @@ class ViewMode:
     # implementation, feel free to override this.
     def drawTexts(self, ctrl, dc, tl):
         dc.SetFont(tl[0])
-        dc.DrawTextList(tl[1][0], tl[1][1], tl[1][2])
+        lines = tl[1][0]
+        points = tl[1][1]
+        colors = tl[1][2]
+        
+        for i in range(len(lines)):
+            dc.SetTextForeground(colors[i])
+            dc.DrawText(lines[i], points[i][0], points[i][1])
 
     # determine what (line, col) is at position (x, y) (screen
     # coordinates) and return that, or (None, None) if (x, y) points
@@ -133,7 +143,8 @@ class ViewMode:
         line = sel.line
         l = ctrl.sp.lines[line]
 
-        column = util.clamp(int((x - sel.x) / sel.fi.fx), 0, len(l.text))
+        rel = util.clamp(int((x - sel.x) / sel.fi.fx), 0, len(sel.text))
+        column = util.clamp(sel.col + rel, 0, len(l.text))
 
         return (line, column)
 
@@ -234,20 +245,48 @@ class ViewModeDraft(ViewMode):
             else:
                 text = l.text
 
+            if ctrl.gd.mainFrame.showFormatting:
+                text = text.replace(" ", "\u00b7")
+                text += config.lb2displayChar(l.lb)
+
             fi = cfgGui.tt2fi(tcfg.screen)
+            baseFlags = 0
+            if tcfg.screen.isBold:
+                baseFlags |= pml.BOLD
+            if tcfg.screen.isItalic:
+                baseFlags |= pml.ITALIC
+            if tcfg.screen.isUnderlined:
+                baseFlags |= pml.UNDERLINED
 
             extraIndent = 1 if ctrl.sp.needsExtraParenIndent(i) else 0
 
-            texts.append(
-                TextString(
-                    i,
-                    text,
-                    cox + marginLeft + (tcfg.indent + extraIndent) * fi.fx,
-                    y,
-                    fi,
-                    tcfg.screen.isUnderlined,
-                )
-            )
+            x = cox + marginLeft + (tcfg.indent + extraIndent) * fi.fx
+            if l.styles:
+                mask = l.getStyleMask()
+                col = 0
+                while col < len(text):
+                    flags = baseFlags | mask[col]
+                    end = col + 1
+                    while (end < len(text)) and ((baseFlags | mask[end]) == flags):
+                        end += 1
+                    seg = text[col:end]
+                    segFi = cfgGui.fonts[flags & 3]
+                    texts.append(
+                        TextString(
+                            i,
+                            seg,
+                            x + col * fi.fx,
+                            y,
+                            segFi,
+                            (flags & pml.UNDERLINED) != 0,
+                            col,
+                        )
+                    )
+                    col = end
+                if len(text) == 0:
+                    texts.append(TextString(i, "", x, y, fi, tcfg.screen.isUnderlined, 0))
+            else:
+                texts.append(TextString(i, text, x, y, fi, tcfg.screen.isUnderlined, 0))
 
             y += fyd
             i += 1
@@ -261,9 +300,10 @@ class ViewModeDraft(ViewMode):
         # this is not really used for much in draft mode, as it has no
         # concept of page width, but it's safer to return something
         # anyway.
-        return (ctrl.sp.cfg.paperWidth / ctrl.chX) * ctrl.getCfgGui().fonts[
+        pageWidth = (ctrl.sp.cfg.paperWidth / ctrl.chX) * ctrl.getCfgGui().fonts[
             pml.NORMAL
         ].fx
+        return pageWidth * MACOS_PAGE_ZOOM
 
     def pos2linecol(self, ctrl, x, y):
         return self.pos2linecolGeneric(ctrl, x, y)
@@ -289,7 +329,7 @@ class ViewModeLayout(ViewMode):
         width, height = ctrl.GetClientSize()
 
         # gap between pages (pixels)
-        pageGap = 10
+        pageGap = 14
         pager = mypager.Pager(ctrl.sp.cfg)
 
         mm2p = ctrl.mm2p
@@ -356,7 +396,8 @@ class ViewModeLayout(ViewMode):
 
             pageY = y
 
-            for op in pg.ops:
+            ops = pg.ops
+            for i, op in enumerate(ops):
                 if not isinstance(op, textOp):
                     continue
 
@@ -371,14 +412,28 @@ class ViewModeLayout(ViewMode):
                     done = True
                     break
 
+                txt = op.text
+                if ctrl.gd.mainFrame.showFormatting:
+                    txt = txt.replace(" ", "·")
+                    if op.line != -1:
+                        is_last = True
+                        for next_op in ops[i + 1 :]:
+                            if isinstance(next_op, textOp):
+                                if next_op.line == op.line:
+                                    is_last = False
+                                break
+                        if is_last:
+                            txt += config.lb2displayChar(ctrl.sp.lines[op.line].lb)
+
                 texts.append(
                     TextString(
                         op.line,
-                        op.text,
+                        txt,
                         int(cox + op.x * mm2p),
                         ypos,
                         cfgGui.fonts[op.flags & 3],
                         op.flags & pml.UNDERLINED,
+                        op.col,
                     )
                 )
 
@@ -402,9 +457,10 @@ class ViewModeLayout(ViewMode):
         return int(ctrl.chY * ctrl.mm2p + 1.0)
 
     def getPageWidth(self, ctrl):
-        return (ctrl.sp.cfg.paperWidth / ctrl.chX) * ctrl.getCfgGui().fonts[
+        pageWidth = (ctrl.sp.cfg.paperWidth / ctrl.chX) * ctrl.getCfgGui().fonts[
             pml.NORMAL
         ].fx
+        return pageWidth * MACOS_PAGE_ZOOM
 
     def pos2linecol(self, ctrl, x, y):
         return self.pos2linecolGeneric(ctrl, x, y)
@@ -433,7 +489,7 @@ class ViewModeSideBySide(ViewMode):
         mm2p = ctrl.mm2p
 
         # gap between pages (+ screen left edge)
-        pageGap = 10
+        pageGap = 14
 
         # how many pages fit on screen
         pageCnt = max(1, (width - pageGap) // (ctrl.pageW + pageGap))
@@ -470,18 +526,33 @@ class ViewModeSideBySide(ViewMode):
             dp = DisplayPage(pageNr, sx, sy, sx + ctrl.pageW, sy + ctrl.pageH)
             dpages.append(dp)
 
-            for op in pg.ops:
+            ops = pg.ops
+            for i, op in enumerate(ops):
                 if not isinstance(op, textOp):
                     continue
+
+                txt = op.text
+                if ctrl.gd.mainFrame.showFormatting:
+                    txt = txt.replace(" ", "·")
+                    if op.line != -1:
+                        is_last = True
+                        for next_op in ops[i + 1 :]:
+                            if isinstance(next_op, textOp):
+                                if next_op.line == op.line:
+                                    is_last = False
+                                break
+                        if is_last:
+                            txt += config.lb2displayChar(ctrl.sp.lines[op.line].lb)
 
                 texts.append(
                     TextString(
                         op.line,
-                        op.text,
+                        txt,
                         int(sx + op.x * mm2p),
                         int(sy + op.y * mm2p),
                         cfgGui.fonts[op.flags & 3],
                         op.flags & pml.UNDERLINED,
+                        op.col,
                     )
                 )
 
@@ -496,9 +567,10 @@ class ViewModeSideBySide(ViewMode):
         return int(ctrl.chY * ctrl.mm2p + 1.0)
 
     def getPageWidth(self, ctrl):
-        return (ctrl.sp.cfg.paperWidth / ctrl.chX) * ctrl.getCfgGui().fonts[
+        pageWidth = (ctrl.sp.cfg.paperWidth / ctrl.chX) * ctrl.getCfgGui().fonts[
             pml.NORMAL
         ].fx
+        return pageWidth * MACOS_PAGE_ZOOM
 
     def pos2linecol(self, ctrl, x, y):
         lineh = self.getLineHeight(ctrl)
@@ -532,7 +604,8 @@ class ViewModeSideBySide(ViewMode):
         line = sel.line
         l = ls[line]
 
-        column = util.clamp(int((x - sel.x) / sel.fi.fx), 0, len(l.text))
+        rel = util.clamp(int((x - sel.x) / sel.fi.fx), 0, len(sel.text))
+        column = util.clamp(sel.col + rel, 0, len(l.text))
 
         return (line, column)
 

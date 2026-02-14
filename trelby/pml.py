@@ -131,6 +131,7 @@ class TextOp(DrawOp):
         align: int = util.ALIGN_LEFT,
         valign: int = util.VALIGN_TOP,
         line: int = -1,
+        col: int = 0,
         angle: Optional[int] = None,
     ):
         """
@@ -149,6 +150,7 @@ class TextOp(DrawOp):
         self.toc: Optional[TOCItem] = None
 
         self.line: int = line
+        self.col: int = col
 
         if align != util.ALIGN_LEFT:
             w = util.getTextWidth(text, flags, size)

@@ -203,6 +203,42 @@ beginning that signal the type of linebreak at the end of that line and
 the general type of the line, and everything after that is the text of the
 line.
 
+Inline style suffix (backward-compatible):
+
+Script line text may optionally end with a style suffix:
+
+  "\t@S:" + ranges
+
+where ranges is zero or more ";"-separated triples:
+
+  start,end,flags
+
+All numbers are decimal integers. start/end are 0-based character offsets
+into the line text, with end exclusive. flags is a bitmask of inline style
+flags:
+
+  1 = bold
+  2 = italic
+  16 = underline
+
+Examples:
+
+  .:Hello\t@S:0,5,1
+  .:Hello world\t@S:0,5,1;6,11,2
+
+Compatibility/migration behavior:
+
+1) Readers that do not implement this suffix can still load the file as
+plain text (they may display the suffix literally if not stripped).
+
+2) Readers that implement it should parse only the last "\t@S:" occurrence
+on a script line as style metadata. Invalid entries should be ignored.
+
+3) Unknown/nonzero bits in flags should be preserved if possible, or
+ignored if unsupported.
+
+4) Style ranges are optional. If missing, line has no inline styles.
+
 Linebreak types:
 
 '>' - A single space.

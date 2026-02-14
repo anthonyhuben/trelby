@@ -21,6 +21,11 @@ class MyPanel(wx.Panel):
         self.scrollBar = wx.ScrollBar(self, -1, style=wx.SB_VERTICAL)
         self.ctrl = MyCtrl(self, -1, gd)
 
+        if wx.Platform == "__WXMAC__":
+            # Use theme workspace color to match the editor background
+            self.SetBackgroundColour(gd.cfgGui.workspaceColor)
+            self.scrollBar.SetBackgroundColour(gd.cfgGui.workspaceColor)
+
         hsizer.Add(self.ctrl, 1, wx.EXPAND)
         hsizer.Add(self.scrollBar, 0, wx.EXPAND)
 

@@ -824,6 +824,33 @@ class MyCtrl(wx.Control):
 
         self.OnPaste(lines)
 
+    def applyInlineMarkup(self, prefix, suffix):
+        try:
+            changed = self.sp.applyInlineMarkup(prefix, suffix)
+        except Exception as e:
+            wx.MessageBox(
+                _("Failed to apply formatting:\n{}".format(e)),
+                _("Error"),
+                wx.OK,
+                self.gd.mainFrame,
+            )
+            return
+
+        if not changed:
+            return
+
+        self.makeLineVisible(self.sp.line)
+        self.updateScreen()
+
+    def OnFormatBold(self):
+        self.applyInlineMarkup("**", "**")
+
+    def OnFormatItalic(self):
+        self.applyInlineMarkup("*", "*")
+
+    def OnFormatUnderline(self):
+        self.applyInlineMarkup("_", "_")
+
     def OnSelectScene(self):
         self.sp.cmd("selectScene")
 
@@ -1273,12 +1300,15 @@ class MyCtrl(wx.Control):
 
     def OnKeyChar(self, ev):
         kc = ev.GetUnicodeKey()
+        if (kc == wx.WXK_NONE) or (not util.isValidInputChar(kc)):
+            kc = ev.GetKeyCode()
 
         cs = screenplay.CommandState()
         cs.mark = bool(ev.ShiftDown())
         scrollDirection = config.SCROLL_CENTER
+        ctrlDown = util.eventControlDown(ev)
 
-        if not ev.ControlDown() and not ev.AltDown() and util.isValidInputChar(kc):
+        if not ctrlDown and not ev.AltDown() and util.isValidInputChar(kc):
             # WX2.6-FIXME: we should probably use GetUnicodeKey() (dunno
             # how to get around the isValidInputChar test in the preceding
             # line, need to test what GetUnicodeKey() returns on
@@ -1306,7 +1336,7 @@ class MyCtrl(wx.Control):
 
         else:
             cmd = self.gd.mainFrame.kbdCommands.get(
-                util.Key(kc, ev.ControlDown(), ev.AltDown(), ev.ShiftDown()).toInt()
+                util.Key(kc, ctrlDown, ev.AltDown(), ev.ShiftDown()).toInt()
             )
 
             if cmd:
@@ -1361,6 +1391,7 @@ class MyCtrl(wx.Control):
         # for header texts. list objects are (x, y, width) tuples.
         ulines = []
         ulinesHdr = []
+        drawnLineDecor = set()
 
         strings, dpages = self.gd.vm.getScreen(self, True, True)
 
@@ -1405,12 +1436,13 @@ class MyCtrl(wx.Control):
 
             if i != -1:
                 l = ls[i]
+                lineStartX = t.x - t.col * fx
 
-                if l.lt == screenplay.NOTE:
+                if (l.lt == screenplay.NOTE) and (i not in drawnLineDecor):
                     dc.SetPen(self.gd.cfgGui.notePen)
                     dc.SetBrush(self.gd.cfgGui.noteBrush)
 
-                    nx = t.x - 5
+                    nx = lineStartX - 5
                     nw = self.sp.cfg.getType(l.lt).width * fx + 10
 
                     dc.DrawRectangle(nx, y, nw, lineh)
@@ -1425,31 +1457,21 @@ class MyCtrl(wx.Control):
                     if self.sp.isLastLineOfElem(i):
                         util.drawLine(dc, nx - 1, y + lineh, nw + 2, 0)
 
-                if marked and self.sp.isLineMarked(i, marked):
+                if marked and self.sp.isLineMarked(i, marked) and (i not in drawnLineDecor):
                     c1, c2 = self.sp.getMarkedColumns(i, marked)
 
-                    dc.SetPen(self.gd.cfgGui.selectedPen)
-                    dc.SetBrush(self.gd.cfgGui.selectedBrush)
+                    if c2 >= c1:
+                         # Calculate tight text selection
+                         text_height = fi.fy
+                         # Center vertically within line height
+                         text_y = y + (lineh - text_height) // 2
+                         
+                         dc.SetPen(self.gd.cfgGui.selectedPen)
+                         dc.SetBrush(self.gd.cfgGui.selectedBrush)
+ 
+                         dc.DrawRectangle(lineStartX + c1 * fx, text_y, (c2 - c1 + 1) * fx, text_height)
 
-                    dc.DrawRectangle(t.x + c1 * fx, y, (c2 - c1 + 1) * fx, lineh)
 
-                if self.gd.mainFrame.showFormatting:
-                    dc.SetPen(self.gd.cfgGui.bluePen)
-                    util.drawLine(dc, t.x, y, 0, lineh)
-
-                    extraIndent = 1 if self.sp.needsExtraParenIndent(i) else 0
-
-                    util.drawLine(
-                        dc,
-                        t.x + (self.sp.cfg.getType(l.lt).width - extraIndent) * fx,
-                        y,
-                        0,
-                        lineh,
-                    )
-
-                    dc.SetTextForeground(self.gd.cfgGui.redColor)
-                    dc.SetFont(self.gd.cfgGui.fonts[pml.NORMAL].font)
-                    dc.DrawText(config.lb2char(l.lb), t.x - 10, y)
 
                 if not dpages:
                     if self.gd.cfgGl.pbi == config.PBI_REAL_AND_UNADJ:
@@ -1470,12 +1492,15 @@ class MyCtrl(wx.Control):
                             util.drawLine(dc, 0, y + lineh - 1, size.width, 0)
 
                 if i == self.sp.line:
-                    posX = t.x
+                    posX = lineStartX
                     cursorY = y
                     acFi = fi
                     dc.SetPen(self.gd.cfgGui.cursorPen)
                     dc.SetBrush(self.gd.cfgGui.cursorBrush)
-                    dc.DrawRectangle(t.x + self.sp.column * fx, y, fx, fi.fy)
+                    # Modern caret cursor (2px width) instead of block
+                    dc.DrawRectangle(lineStartX + self.sp.column * fx, y, 2, fi.fy)
+
+                drawnLineDecor.add(i)
 
             if len(t.text) != 0:
                 # tl = texts.get(fi.font)
