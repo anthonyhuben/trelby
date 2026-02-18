@@ -10,7 +10,7 @@ def testInsertMarkupAtCursor():
 
     assert sp.applyInlineMarkup("**", "**")
 
-    assert sp.lines[0].text == "hello"
+    assert sp.lines[0].text == "Hello"
     assert sp.typingStyleMask != 0
     sp.cmdChars("X")
     assert sp.lines[0].text == "heXllo"

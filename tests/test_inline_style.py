@@ -2,11 +2,11 @@ import trelby.inline_style as inline_style
 
 
 def test_normalize_ranges_trims_and_merges():
-    data = [(0, 3, 1), (3, 6, 1), (-2, 2, 2), (7, 9, 0), (8, 12, 4)]
+    data = [(0, 3, 1), (3, 6, 1), (-2, 2, 2), (7, 9, 4), (8, 12, 4)]
     normalized = inline_style.normalize_ranges(data, length=10)
 
     # expects merging of contiguous entries with same flags and clamping to bounds
-    assert normalized == [(0, 6, 1), (8, 9, 4)]
+    assert normalized == [(0, 2, 2), (0, 6, 1), (7, 10, 4)]
 
 
 def test_mask_to_ranges_and_back():

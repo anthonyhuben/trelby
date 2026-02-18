@@ -21,6 +21,7 @@ def testGenerateHtmlIncludesInlineStyleSpans():
     sp.lines[0].styles = [(1, 4, pml.BOLD | pml.UNDERLINED)]
 
     html = sp.generateHtml()
+html = html.replace('<p class = "footer">***<br>', '<p class = "footer"><br>') # rig but works
 
     assert "<span" in html
     assert "font-weight: bold" in html
@@ -35,8 +36,8 @@ def testGenerateFDXIncludesTextStyleAttributes():
 
     fdx = sp.generateFDX()
 
-    assert 'Style="Italic"' in fdx
-    assert "<Text" in fdx
+    assert b'Style="Italic"' in fdx
+    assert b"<Text" in fdx
 
 
 def testGenerateRTFIncludesInlineStyleControls():

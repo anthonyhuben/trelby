@@ -34,7 +34,7 @@ def normalize_ranges(ranges: Iterable[StyleRange], length: int) -> List[StyleRan
 
     merged: List[StyleRange] = []
     for start, end, flags in normalized:
-        if merged and (merged[-1][1] == start) and (merged[-1][2] == flags):
+        if merged and (merged[-1][1] >= start) and (merged[-1][2] == flags):
             merged[-1] = (merged[-1][0], end, flags)
         else:
             merged.append((start, end, flags))
